@@ -2,11 +2,16 @@ import { samplePdf, syntheticSamples } from "../lib/samples";
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
-import { db } from "../lib/db";
+import { db, databaseBackend } from "../lib/db";
 import { storeFile, removeFile } from "../lib/storage";
 import { proposalHash } from "../lib/service";
 export async function seed() {
-  if (process.env.AUTH_MODE !== "demo" || process.env.NODE_ENV === "production")
+  if (
+    process.env.AUTH_MODE !== "demo" ||
+    process.env.NODE_ENV === "production" ||
+    databaseBackend() !== "sqlite" ||
+    process.env.STORAGE_BACKEND === "supabase"
+  )
     throw new Error("Synthetic seeding is restricted to local demo mode.");
   const old = await db.document.findMany({ select: { storageId: true } });
   await db.$transaction([

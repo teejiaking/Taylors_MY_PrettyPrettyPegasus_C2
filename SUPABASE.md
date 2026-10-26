@@ -1,8 +1,8 @@
 # Real accounts with Supabase Auth
 
-TrustVault now supports real Supabase email/password accounts. The configured local project is `umyierhvfoqkgsubuhvs`, at `https://umyierhvfoqkgsubuhvs.supabase.co`. Its URL and publishable key are stored in ignored `.env`, not committed. No service-role key is used.
+TrustVault supports real Supabase email/password accounts. The configured project is `umyierhvfoqkgsubuhvs`, at `https://umyierhvfoqkgsubuhvs.supabase.co`. Local settings are stored in ignored `.env`. Hosted deployments also use a server-only secret key for private Storage; this key is never used as the authentication client's publishable key.
 
-Supabase is the identity provider in this mode. SQLite/Prisma still stores TrustVault documents, consent, roles, policy and audit records, and original files remain encrypted on this server. This is not a migration of the vault database or file storage to Supabase. No Supabase database tables, RLS policies, project settings or accounts were changed by this integration.
+Supabase is the identity provider in this mode. On Vercel, PostgreSQL stores documents, consent, roles, policy and audit records in the private `trustvault` schema, and Supabase Storage holds encrypted originals in a private bucket. Local development can retain SQLite and filesystem storage. Follow **[HOSTING.md](HOSTING.md)** for the hosted setup and migration; the local instructions below preserve the existing local data.
 
 ## Installation and startup
 
@@ -30,7 +30,7 @@ npm run build
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. For editing, use `npm run dev`. Local Supabase production builds use `.next-supabase/`, separate from the optional compiled demo. Vercel builds use standard `.next/`; see the [Vercel build configuration and persistence limitations in README](README.md#vercel-build-configuration) before deploying. Keep the server running. A fresh database gets the seven-day policy via migration and contains no demo users. Existing demo files and `prisma/trustvault.db` are preserved separately on this workspace.
+Open **http://127.0.0.1:3000**. For editing, use `npm run dev`. Local Supabase production builds use `.next-supabase/`, separate from the optional compiled demo. Vercel builds use standard `.next/`; see [HOSTING.md](HOSTING.md) before deploying. Keep the server running. A fresh database gets the seven-day policy via migration and contains no demo users. Existing demo files and `prisma/trustvault.db` are preserved separately on this workspace.
 
 All application auth requests go through same-origin server routes. `SUPABASE_URL` and the publishable key stay in server environment variables in this architecture; neither is a service-role secret. Passwords are submitted to Supabase over HTTPS and are not stored in Prisma or application logs. Supabase session cookies are HttpOnly, SameSite=Lax, Secure for HTTPS, chunked by the official SSR SDK, and excluded from cached responses. Route handlers verify with `getUser()` and propagate refreshed cookies on that same response; the public application shell does not make auth decisions from a browser session object. Because protected data is served by writable route handlers, no separate Server Component auth proxy is required here.
 
@@ -61,11 +61,11 @@ Use actual confirmed accounts and their actual IDs/emails. Do not run the litera
 ## Verification and limits
 
 - Live project connection checked: `GET /auth/v1/settings` returned HTTP 200; email provider enabled, signup enabled, automatic email confirmation disabled.
-- `npm test`: 32 passing tests. Original document/consent/governance tests plus installed-SDK auth tests for `getUser`, cookie rotation, HttpOnly/no-store cookies, rejected identities, confirmation, immutable subject mapping, metadata escalation prevention, safe defaults and owner-scoped samples.
+- `npm test`: 39 passing tests. Original document/consent/governance tests plus installed-SDK auth tests, encrypted hosted Storage round trips and fail-closed Vercel persistence checks.
 - Production build and typecheck passed. `npm run test:supabase` passed against the running app/live provider without creating users or sending email; it verifies demo login is disabled and invalid credentials cannot authenticate. Browser checks confirmed the sign-in/signup form and absence of demo identities.
 - Supabase-specific automated success flows use mocked provider HTTP responses through the actual installed SDK. No real user was created and no confirmation email was sent as a test. Actual successful email confirmation/sign-in requires the user to complete their own account flow.
 - Tested package versions: `@supabase/supabase-js` 2.118.0 and `@supabase/ssr` 0.12.7, pinned with the lockfile.
-- The tagged Supabase connector returned “tool not available”; read-only project connection was verified through the public Auth API using the supplied publishable key. No dashboard login or remote administration was performed.
+- The tagged Supabase connector returned “tool not available”; dashboard administration uses the user's authenticated Chrome session when needed. Live configuration and deployment must be verified separately from local tests.
 - Supabase sign-out revokes the current refresh session and clears its application cookies. Access tokens already copied elsewhere may remain valid until expiry; every document/grant check still independently enforces current server-side permissions and grant revocation. This prototype does not claim immediate global access-token invalidation.
 - Email delivery, SMTP quotas, confirmation redirect allowlists, password rules and abuse protection are project configuration. Add CAPTCHA/rate limits and review deployment controls before accepting real sensitive documents; this build remains synthetic-document-only.
 

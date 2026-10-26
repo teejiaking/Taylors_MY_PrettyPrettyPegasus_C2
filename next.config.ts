@@ -9,7 +9,11 @@ const config: NextConfig = {
           ? ".next-supabase"
           : ".next-production"
         : ".next",
-  serverExternalPackages: ["@prisma/client", "@tidecloak/nextjs"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "@prisma/trustvault-postgres",
+    "@tidecloak/nextjs",
+  ],
   async headers() {
     return [
       {

@@ -6,6 +6,8 @@ const env: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
   AUTH_MODE: "demo",
   DATABASE_URL: "file:./trustvault-test.db",
+  DATABASE_BACKEND: "sqlite",
+  STORAGE_BACKEND: "local",
   STORAGE_DIR: "./test-results/storage",
 };
 const migration = spawnSync(

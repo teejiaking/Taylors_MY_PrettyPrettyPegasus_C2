@@ -11,3 +11,5 @@ private-storage-*/
 prisma/*.db*
 *.tsbuildinfo
 test-results/
+prisma/postgres/migrations/
+supabase/.temp/

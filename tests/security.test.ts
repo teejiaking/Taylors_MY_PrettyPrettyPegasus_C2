@@ -3,7 +3,7 @@ import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { db } from "../lib/db";
+import { db, databaseBackend } from "../lib/db";
 import { seed } from "../scripts/seed";
 import * as s from "../lib/service";
 import { assess } from "../lib/guardian";
@@ -16,7 +16,14 @@ import {
   tidecloakLoginConfigured,
 } from "../lib/auth";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
-import { readFilePrivate, validateFile, AppError } from "../lib/storage";
+import {
+  readFilePrivate,
+  validateFile,
+  storeFile,
+  removeFile,
+  AppError,
+} from "../lib/storage";
+import { hostedStorage } from "../lib/hosted-storage";
 import type { User } from "@prisma/client";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import {
@@ -1115,3 +1122,127 @@ test("real students own their synthetic samples and real recipients cannot reque
     true,
   );
 });
+
+test("hosted storage uploads encrypted bytes, authenticates downloads, detects tampering and removes only its object", async () =>
+  withAuthEnv(
+    {
+      STORAGE_BACKEND: "supabase",
+      SUPABASE_URL: "https://storage.example.test",
+      SUPABASE_SECRET_KEY: "sb_secret_test-fixture",
+      SUPABASE_STORAGE_BUCKET: "trustvault-test",
+    },
+    async () => {
+      const originalFetch = globalThis.fetch;
+      let stored = Buffer.alloc(0),
+        removed = false,
+        tamper = false;
+      let objectId = "";
+      globalThis.fetch = async (input, init) => {
+        const url = new URL(String(input));
+        assert.equal(url.hostname, "storage.example.test");
+        assert.equal(
+          new Headers(init?.headers).get("apikey"),
+          "sb_secret_test-fixture",
+        );
+        if (init?.method === "POST") {
+          objectId = url.pathname.split("/").at(-1)!;
+          assert.match(
+            url.pathname,
+            /\/storage\/v1\/object\/trustvault-test\//,
+          );
+          assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+          stored = Buffer.from(init.body as Uint8Array);
+          return providerResponse({ Key: "trustvault-test/" + objectId });
+        }
+        if (init?.method === "DELETE") {
+          assert.deepEqual(JSON.parse(String(init.body)).prefixes, [objectId]);
+          removed = true;
+          return providerResponse([]);
+        }
+        assert.equal(
+          url.pathname,
+          "/storage/v1/object/trustvault-test/" + objectId,
+        );
+        const result = Buffer.from(stored);
+        if (tamper) result[result.length - 1] ^= 1;
+        return new Response(result, {
+          headers: { "Content-Type": "application/octet-stream" },
+        });
+      };
+      try {
+        const plaintext = Buffer.from(
+          "%PDF-1.4 synthetic private test document",
+        );
+        const id = await storeFile(plaintext, "application/pdf");
+        assert.equal(id, objectId);
+        assert.equal(stored.length, plaintext.length + 28);
+        assert.equal(stored.includes(plaintext), false);
+        assert.deepEqual(await readFilePrivate(id), plaintext);
+        tamper = true;
+        await assert.rejects(() => readFilePrivate(id));
+        await removeFile(id);
+        assert.equal(removed, true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  ));
+
+test("hosted storage rejects public keys and provider failures without falling back to local files", async () =>
+  withAuthEnv(
+    {
+      STORAGE_BACKEND: "supabase",
+      SUPABASE_URL: "https://storage.example.test",
+      SUPABASE_SECRET_KEY: "sb_publishable_not-privileged",
+    },
+    async () => {
+      assert.throws(() => hostedStorage(), /secret key/);
+      process.env.SUPABASE_SECRET_KEY = "sb_secret_test-fixture";
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        providerResponse({ message: "internal provider detail" }, 400);
+      try {
+        await denied(
+          () => storeFile(Buffer.from("%PDF-1.4 synthetic"), "application/pdf"),
+          503,
+        );
+        await denied(
+          () => readFilePrivate("11111111-1111-4111-8111-111111111111"),
+          503,
+        );
+        await denied(
+          () => removeFile("11111111-1111-4111-8111-111111111111"),
+          503,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  ));
+
+test("Vercel rejects local database and file persistence and requires hosted configuration", async () =>
+  withAuthEnv(
+    {
+      VERCEL: "1",
+      DATABASE_BACKEND: undefined,
+      STORAGE_BACKEND: undefined,
+      SUPABASE_DATABASE_URL: undefined,
+      SUPABASE_SECRET_KEY: undefined,
+    },
+    async () => {
+      assert.equal(databaseBackend(), "supabase");
+      await assert.rejects(() => seed(), /local demo mode/);
+      assert.throws(() => db.user, /SUPABASE_DATABASE_URL/);
+      await assert.rejects(
+        () => storeFile(Buffer.from("%PDF-1.4 synthetic"), "application/pdf"),
+        /SUPABASE_SECRET_KEY/,
+      );
+      process.env.DATABASE_BACKEND = "sqlite";
+      process.env.STORAGE_BACKEND = "local";
+      assert.throws(() => db.user, /persistent Supabase/);
+      await assert.rejects(
+        () => storeFile(Buffer.from("%PDF-1.4 synthetic"), "application/pdf"),
+        /persistent private storage/,
+      );
+    },
+  ));

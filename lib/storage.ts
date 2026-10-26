@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { hostedStorage } from "./hosted-storage";
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 export class AppError extends Error {
   constructor(
@@ -21,9 +22,22 @@ function key() {
     throw new Error("Configure a 32-byte hex DOCUMENT_ENCRYPTION_KEY.");
   return Buffer.from(value, "hex");
 }
-function location(id: string) {
+function checkId(id: string) {
   if (!/^[a-f0-9-]{36}$/.test(id))
     throw new AppError(400, "Invalid storage identifier.");
+}
+function remote() {
+  const backend =
+    process.env.STORAGE_BACKEND ||
+    (process.env.VERCEL === "1" ? "supabase" : "local");
+  if (!["local", "supabase"].includes(backend))
+    throw new Error("Unknown STORAGE_BACKEND.");
+  if (process.env.VERCEL === "1" && backend !== "supabase")
+    throw new Error("Vercel requires persistent private storage.");
+  return backend === "supabase";
+}
+function location(id: string) {
+  checkId(id);
   const root = path.resolve(process.env.STORAGE_DIR ?? "./private-storage");
   if (
     root === path.resolve("public") ||
@@ -54,20 +68,43 @@ export function validateFile(bytes: Buffer, mime: string) {
 export async function storeFile(bytes: Buffer, mime: string) {
   validateFile(bytes, mime);
   const id = randomUUID(),
-    file = location(id),
     iv = randomBytes(12),
     cipher = createCipheriv("aes-256-gcm", key(), iv);
   cipher.setAAD(Buffer.from(id));
   const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  const sealed = Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+  if (remote()) {
+    const { error } = await hostedStorage().upload(id, sealed, {
+      contentType: "application/octet-stream",
+      upsert: false,
+    });
+    if (error)
+      throw new AppError(
+        503,
+        "Private file storage is unavailable. Try again.",
+      );
+    return id;
+  }
+  const file = location(id);
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, Buffer.concat([iv, cipher.getAuthTag(), ciphertext]), {
+  await writeFile(file, sealed, {
     mode: 0o600,
     flag: "wx",
   });
   return id;
 }
 export async function readFilePrivate(id: string) {
-  const sealed = await readFile(location(id));
+  checkId(id);
+  let sealed: Buffer;
+  if (remote()) {
+    const { data, error } = await hostedStorage().download(id);
+    if (error || !data)
+      throw new AppError(
+        503,
+        "Private file storage is unavailable. Try again.",
+      );
+    sealed = Buffer.from(await data.arrayBuffer());
+  } else sealed = await readFile(location(id));
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key(),
@@ -81,5 +118,13 @@ export async function readFilePrivate(id: string) {
   ]);
 }
 export async function removeFile(id: string) {
-  await unlink(location(id));
+  checkId(id);
+  if (remote()) {
+    const { error } = await hostedStorage().remove([id]);
+    if (error)
+      throw new AppError(
+        503,
+        "Private file storage is unavailable. Try again.",
+      );
+  } else await unlink(location(id));
 }

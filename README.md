@@ -6,7 +6,7 @@ Visitors can browse the website without signing in. The public preview includes 
 
 ## Real accounts: Supabase (current configuration)
 
-The active workspace uses **Supabase Auth**, with a separate real-account SQLite database and private storage directory. Sign up with your own email, confirm it, then sign in. There is no demo account switcher in this mode. Start with `npm run setup`, configure the project URL/publishable key in `.env`, then `npm run db:migrate`, `npm run build`, and `npm start`. See **[SUPABASE.md](SUPABASE.md)** for exact settings, staff role provisioning, verified-session handling, and current integration/test status. No service-role secret is needed. The TideCloak adapter remains an optional alternate provider.
+The active workspace uses **Supabase Auth**. Hosted deployments use Supabase PostgreSQL and private encrypted Storage; local development can retain its separate SQLite database and private directory. Sign up with your own email, confirm it, then sign in. There is no demo account switcher in this mode. Start with `npm run setup` and see **[SUPABASE.md](SUPABASE.md)** for authentication and staff provisioning. Follow **[HOSTING.md](HOSTING.md)** for database migration, private Storage, Vercel environment variables and deployment. The TideCloak adapter remains optional and is inactive in Supabase mode.
 
 ## Sign-in redirects to localhost from a deployed website
 
@@ -53,7 +53,7 @@ npm run typecheck
 npm run build
 ```
 
-`npm test` migrates and resets a separate `prisma/trustvault-test.db` and uses `test-results/storage`; it does not reset the active real-account database or demo database. It runs 32 tests, including Supabase session/role tests and cryptographic token validation using the installed TideCloak verifier and locally generated test keys. SDK provider fixtures are used for automated Supabase success flows; these are not successful live email account tests.
+`npm test` migrates and resets a separate `prisma/trustvault-test.db` and uses `test-results/storage`; it does not reset the active real-account database or demo database. It runs 39 tests, including Supabase session/role tests, encrypted hosted-storage tests, Vercel persistence configuration checks and cryptographic token validation. SDK provider fixtures are used for automated Supabase success flows; these are not successful live email account tests.
 
 With `npm run demo` or `npm run dev` running in another terminal:
 
@@ -72,9 +72,9 @@ Webpack is used explicitly because Turbopack's Windows worker failed in this env
 
 `vercel.json` selects the Next.js framework, `npm run build`, and `.next` output. `next.config.ts` uses `.next` when Vercel sets `VERCEL=1`; the separate local production directories described above remain available for local presentations. Set the Vercel Root Directory to the repository root and use Node.js 24.x. Redeploy the latest commit after changing settings. Keep Vercel system environment variables enabled so `VERCEL` is available during builds and at runtime.
 
-This fixes build-output discovery, but **the complete vault is not ready for Vercel's serverless runtime**. Supabase currently supplies authentication only. Prisma still uses local SQLite, and encrypted originals still use local filesystem storage. Vercel does not provide durable shared local storage for these operations ([official SQLite guidance](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel)). Do not point these stores at `/tmp` or seed them during builds as a persistence workaround. For a working hosted vault, either run this application on a Node server with a persistent private disk, or migrate the database and encrypted file storage to durable hosted services before using Vercel.
+Vercel uses the Supabase database and Storage backends. Follow **[HOSTING.md](HOSTING.md)** to migrate the private PostgreSQL schema, create the private document bucket and configure server secrets before deployment. Vercel does not provide durable shared SQLite or local files ([official SQLite guidance](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel)); this application rejects those backends on Vercel. Do not point them at `/tmp` or seed demo identities during builds.
 
-For hosted Supabase authentication, configure `AUTH_MODE=supabase`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `APP_ORIGIN` (the exact HTTPS deployment origin), `SESSION_SECRET`, and `DOCUMENT_ENCRYPTION_KEY` in server environment variables. Allow the matching `/auth/callback` URL in Supabase. `.env` is intentionally not committed. These settings alone do not replace the vault's local persistence.
+For hosted Supabase authentication, configure `AUTH_MODE=supabase`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `APP_ORIGIN` (the exact HTTPS deployment origin). Allow the matching `/auth/callback` URL in Supabase. Database and Storage variables are also required as described in HOSTING.md. `.env` is intentionally not committed.
 
 ## Implemented screens and operations
 

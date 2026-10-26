@@ -8,8 +8,7 @@ import type {
   User as SupabaseUser,
 } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-import { db } from "./db";
+import { db, isUniqueViolation } from "./db";
 import { AppError } from "./storage";
 
 export function supabaseConfigured() {
@@ -128,10 +127,7 @@ export async function resolveSupabaseUser(verified: SupabaseUser) {
       },
     });
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (isUniqueViolation(error)) {
       const raced = await db.user.findUnique({ where: { subject } });
       if (raced && !raced.demo) return raced;
       throw new AppError(
