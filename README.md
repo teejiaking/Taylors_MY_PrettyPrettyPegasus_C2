@@ -8,6 +8,14 @@ Visitors can browse the website without signing in. The public preview includes 
 
 The active workspace uses **Supabase Auth**, with a separate real-account SQLite database and private storage directory. Sign up with your own email, confirm it, then sign in. There is no demo account switcher in this mode. Start with `npm run setup`, configure the project URL/publishable key in `.env`, then `npm run db:migrate`, `npm run build`, and `npm start`. See **[SUPABASE.md](SUPABASE.md)** for exact settings, staff role provisioning, verified-session handling, and current integration/test status. No service-role secret is needed. The TideCloak adapter remains an optional alternate provider.
 
+## Sign-in redirects to localhost from a deployed website
+
+If a hosted site sends you to `127.0.0.1:3000/?authError=1`, its sign-in configuration is missing or still points to a local development address. `127.0.0.1` refers to the visitor's own computer. It cannot serve the deployed website.
+
+In the hosting project's environment settings, set `APP_ORIGIN` to the exact HTTPS website origin, such as `https://trustvault-odin.vercel.app`, and configure the intended provider. For Supabase, keep `AUTH_MODE=supabase`, `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`; allow that website's `/auth/callback` URL in Supabase. For TideCloak, use `AUTH_MODE=tidecloak`, the identity server's `TIDECLOAK_ISSUER`, `TIDECLOAK_CLIENT_ID`, `TIDECLOAK_CLIENT_SECRET`, and matching `TIDECLOAK_CONFIG_JSON`, plus the server-only session/encryption keys described below. A Vercel application URL is not a TideCloak realm URL. Redeploy after changing environment settings. Supabase support remains available; these are alternate sign-in providers.
+
+The app now reports an unconfigured provider accurately and does not offer a TideCloak login for missing settings. Failed authentication stays on the website where it began. Changing authentication settings does not resolve the local SQLite/private-storage hosting limitation described below.
+
 ## Optional local demo
 
 For an existing real-account configuration, deliberately switch `.env` to `AUTH_MODE="demo"`, `DATABASE_URL="file:./trustvault.db"` and `STORAGE_DIR="./private-storage"` first. Never run a demo reset against the real-account database. `demo:setup` preserves an existing `.env`; it does not switch its mode automatically.

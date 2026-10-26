@@ -1,5 +1,14 @@
 # TrustVault verification
 
+## Deployed sign-in redirect fix — 26 October 2026
+
+- Reproduced the issue on `https://trustvault-odin.vercel.app`: the session endpoint reported `authMode=unconfigured` with `configured=true`, while `/auth/login` redirected to `http://127.0.0.1:3000/?authError=1`.
+- Supabase code, packages and local configuration are preserved. No provider accounts, secrets or hosted environment settings were changed.
+- Missing providers now report `configured=false`. The UI offers TideCloak sign-in only when TideCloak is selected and its settings are valid; a failed session request shows a retry screen.
+- Authentication failures remain on the requesting website. A mismatched `APP_ORIGIN` produces an error on that website instead of redirecting to localhost.
+- `npm test`: 36 passing tests. Added coverage includes missing settings, a deployed request with a localhost origin setting, and a simulated TideCloak authorization-code callback with state/PKCE checks, signed-token verification, and secure session cookies. Supabase login/session tests still pass.
+- Production build passed after retrying with host permissions for a Windows build-directory permission error. Live TideCloak sign-in still requires an actual realm, client configuration and provisioned subject mappings; none was provided for the Vercel deployment.
+
 Run on 22 October 2026 on Windows with Node.js 24.16.0. These are actual results, not planned checks.
 
 ## Public browsing update

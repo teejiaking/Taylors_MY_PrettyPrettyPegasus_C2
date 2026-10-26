@@ -13,6 +13,7 @@ import {
   makeDemoSession,
   isDemo,
   verifyTideToken,
+  tidecloakLoginConfigured,
 } from "../lib/auth";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { readFilePrivate, validateFile, AppError } from "../lib/storage";
@@ -27,6 +28,7 @@ import {
 } from "../lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 import { GET as apiGet, POST as authPost } from "../app/api/[...path]/route";
+import { GET as authGet } from "../app/auth/[action]/route";
 let student: User,
   recipient: User,
   adminA: User,
@@ -69,6 +71,27 @@ const denied = (fn: () => Promise<unknown>, status: number) =>
     fn,
     (e: unknown) => e instanceof AppError && e.status === status,
   );
+
+async function withAuthEnv(
+  values: Record<string, string | undefined>,
+  work: () => Promise<void>,
+) {
+  const saved = Object.fromEntries(
+    Object.keys(values).map((key) => [key, process.env[key]]),
+  );
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await work();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 function supabaseFixture(
   id = "11111111-1111-4111-8111-111111111111",
@@ -573,6 +596,166 @@ test("installed TideCloak SDK verifies signed tokens and rejects invalid signatu
   }
 });
 
+test("missing authentication settings never advertise a configured provider", async () => {
+  for (const mode of [undefined, "tidecloak"]) {
+    await withAuthEnv(
+      {
+        AUTH_MODE: mode,
+        APP_ORIGIN: undefined,
+        TIDECLOAK_ISSUER: undefined,
+        TIDECLOAK_CLIENT_SECRET: undefined,
+        TIDECLOAK_CONFIG_JSON: undefined,
+      },
+      async () => {
+        const origin = "https://trustvault.example.test";
+        const response = await apiGet(
+          new NextRequest(origin + "/api/session"),
+          {
+            params: Promise.resolve({ path: ["session"] }),
+          },
+        );
+        const session = await response.json();
+        assert.equal(session.configured, false);
+        assert.equal(session.user, null);
+        assert.deepEqual(session.identities, []);
+        assert.equal(tidecloakLoginConfigured(), false);
+        const login = await authGet(new NextRequest(origin + "/auth/login"), {
+          params: Promise.resolve({ action: "login" }),
+        });
+        const location = new URL(login.headers.get("location")!);
+        assert.equal(location.origin, origin);
+        assert.equal(location.searchParams.get("authError"), "configuration");
+        assert.equal(login.cookies.get("tv_tide"), undefined);
+      },
+    );
+  }
+});
+
+test("a deployed login with a localhost APP_ORIGIN fails on the deployed website", async () => {
+  await withAuthEnv(
+    { AUTH_MODE: "tidecloak", APP_ORIGIN: "http://127.0.0.1:3000" },
+    async () => {
+      const origin = "https://trustvault-odin.vercel.app";
+      const response = await authGet(new NextRequest(origin + "/auth/login"), {
+        params: Promise.resolve({ action: "login" }),
+      });
+      const location = new URL(response.headers.get("location")!);
+      assert.equal(location.origin, origin);
+      assert.equal(location.searchParams.get("authError"), "origin");
+      assert.match(response.headers.get("cache-control")!, /no-store/);
+      assert.equal(response.cookies.get("tv_tide"), undefined);
+    },
+  );
+});
+
+test("configured TideCloak login validates state and PKCE and sets a verified session", async () => {
+  const { publicKey, privateKey } = await generateKeyPair("EdDSA");
+  const jwk = {
+    ...(await exportJWK(publicKey)),
+    kid: "callback-test-key",
+    alg: "EdDSA",
+  };
+  const origin = "https://trustvault.example.test";
+  const issuer = "https://callback-identity.example.test/realms/trustvault";
+  const subject = "real:callback-test-subject";
+  await db.user.create({
+    data: {
+      subject,
+      name: "Callback Student",
+      email: "callback-student@example.test",
+      role: "STUDENT",
+      demo: false,
+    },
+  });
+  await withAuthEnv(
+    {
+      NODE_ENV: "production",
+      AUTH_MODE: "tidecloak",
+      APP_ORIGIN: origin,
+      TIDECLOAK_ISSUER: issuer,
+      TIDECLOAK_CLIENT_ID: "trustvault",
+      TIDECLOAK_CLIENT_SECRET: "callback-test-only-secret",
+      TIDECLOAK_CONFIG_JSON: JSON.stringify({
+        "auth-server-url": "https://callback-identity.example.test",
+        realm: "trustvault",
+        resource: "trustvault",
+        jwk: { keys: [jwk] },
+      }),
+    },
+    async () => {
+      assert.equal(tidecloakLoginConfigured(), true);
+      const accessToken = await new SignJWT({
+        sub: subject,
+        iss: issuer,
+        azp: "trustvault",
+        realm_access: { roles: ["student"] },
+        exp: Math.floor(Date.now() / 1000) + 300,
+      })
+        .setProtectedHeader({ alg: "EdDSA", kid: "callback-test-key" })
+        .sign(privateKey);
+      const login = await authGet(new NextRequest(origin + "/auth/login"), {
+        params: Promise.resolve({ action: "login" }),
+      });
+      const location = new URL(login.headers.get("location")!);
+      assert.equal(location.origin, "https://callback-identity.example.test");
+      assert.equal(
+        location.searchParams.get("redirect_uri"),
+        origin + "/auth/callback",
+      );
+      assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+      assert.ok(location.searchParams.get("code_challenge"));
+      const state = location.searchParams.get("state")!;
+      const saved = login.cookies.get("tv_oidc")!;
+      assert.equal(saved.path, "/auth");
+      assert.equal(saved.httpOnly, true);
+      assert.equal(saved.secure, true);
+      const originalFetch = globalThis.fetch;
+      let exchanges = 0;
+      globalThis.fetch = async (input, init) => {
+        assert.equal(String(input), issuer + "/protocol/openid-connect/token");
+        exchanges++;
+        const body = new URLSearchParams(String(init?.body));
+        assert.equal(body.get("redirect_uri"), origin + "/auth/callback");
+        assert.equal(body.get("grant_type"), "authorization_code");
+        assert.ok(body.get("code_verifier"));
+        return providerResponse({ access_token: accessToken });
+      };
+      const callback = (stateValue: string) =>
+        authGet(
+          new NextRequest(
+            origin +
+              "/auth/callback?code=test-code&state=" +
+              encodeURIComponent(stateValue),
+            { headers: { cookie: `tv_oidc=${saved.value}` } },
+          ),
+          { params: Promise.resolve({ action: "callback" }) },
+        );
+      try {
+        const rejected = await callback("wrong-state");
+        assert.equal(exchanges, 0);
+        assert.equal(rejected.cookies.get("tv_tide"), undefined);
+        assert.equal(rejected.cookies.get("tv_oidc")?.path, "/auth");
+        const accepted = await callback(state);
+        assert.equal(exchanges, 1);
+        assert.equal(accepted.headers.get("location"), origin + "/");
+        const session = accepted.cookies.get("tv_tide")!;
+        assert.equal(session.value, accessToken);
+        assert.equal(session.httpOnly, true);
+        assert.equal(session.secure, true);
+        assert.equal(accepted.cookies.get("tv_oidc")?.path, "/auth");
+        const user = await authenticate(
+          new Request(origin, {
+            headers: { cookie: `tv_tide=${session.value}` },
+          }),
+        );
+        assert.equal(user.subject, subject);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  );
+});
+
 test("Supabase getUser verification provisions a student and ignores editable role metadata", async () =>
   withSupabaseTest(async () => {
     const user = supabaseFixture();
@@ -672,6 +855,43 @@ test("Supabase email collisions never automatically link a demo or another provi
       (await db.user.findUniqueOrThrow({ where: { id: student.id } })).demo,
       true,
     );
+  }));
+
+test("legacy login links open the configured Supabase form without a callback error", async () =>
+  withSupabaseTest(async () => {
+    const originalFetch = globalThis.fetch;
+    let providerCalls = 0;
+    globalThis.fetch = async () => {
+      providerCalls++;
+      throw new Error("Opening the sign-in form must not contact the provider");
+    };
+    try {
+      const response = await authGet(
+        new NextRequest("http://127.0.0.1:3000/auth/login"),
+        { params: Promise.resolve({ action: "login" }) },
+      );
+      const target = new URL(response.headers.get("location")!);
+      assert.equal(response.status, 307);
+      assert.equal(target.origin, new URL(process.env.APP_ORIGIN!).origin);
+      assert.equal(target.searchParams.get("signIn"), "1");
+      assert.equal(target.searchParams.has("authError"), false);
+      assert.match(response.headers.get("cache-control")!, /no-store/);
+      assert.equal(providerCalls, 0);
+      // Incomplete callbacks must still fail closed, rather than authenticate.
+      const callback = await authGet(
+        new NextRequest("http://127.0.0.1:3000/auth/callback"),
+        { params: Promise.resolve({ action: "callback" }) },
+      );
+      assert.equal(
+        new URL(callback.headers.get("location")!).searchParams.get(
+          "authError",
+        ),
+        "1",
+      );
+      assert.equal(callback.headers.has("set-cookie"), false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   }));
 
 test("Supabase password login writes HttpOnly no-store cookies and logout clears them", async () =>

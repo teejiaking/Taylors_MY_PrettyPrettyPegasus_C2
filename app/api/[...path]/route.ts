@@ -14,6 +14,7 @@ import {
   isDemo,
   makeDemoSession,
   sessionCookie,
+  tidecloakLoginConfigured,
 } from "@/lib/auth";
 import { AppError } from "@/lib/storage";
 import * as service from "@/lib/service";
@@ -71,7 +72,9 @@ async function dispatch(
         demo: isDemo(),
         authMode: process.env.AUTH_MODE || "unconfigured",
         configured:
-          process.env.AUTH_MODE === "supabase" ? supabaseConfigured() : true,
+          isDemo() ||
+          (process.env.AUTH_MODE === "supabase" && supabaseConfigured()) ||
+          (process.env.AUTH_MODE === "tidecloak" && tidecloakLoginConfigured()),
         identities,
       });
     }

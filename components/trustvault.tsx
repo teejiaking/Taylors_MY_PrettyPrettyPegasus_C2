@@ -208,17 +208,34 @@ export default function TrustVault() {
       identities: Identity[];
     }>("session");
     setSession(s);
-    if (s.user) setData(await api<Data>("overview"));
-    else setData(null);
+    if (s.user) {
+      setData(await api<Data>("overview"));
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("authError") || url.searchParams.has("signIn")) {
+        url.searchParams.delete("authError");
+        url.searchParams.delete("signIn");
+        window.history.replaceState(
+          null,
+          "",
+          url.pathname + url.search + url.hash,
+        );
+      }
+    } else setData(null);
   }
   useEffect(() => {
     refresh()
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-    if (new URLSearchParams(location.search).has("authError")) {
+    const query = new URLSearchParams(location.search);
+    if (query.has("signIn")) setShowSignIn(true);
+    if (query.has("authError")) {
       setShowSignIn(true);
       setError(
-        "Sign-in confirmation failed or expired. Try signing in again, or check the authentication provider configuration.",
+        query.get("authError") === "configuration"
+          ? "Sign-in is not configured on this website. Contact the project operator."
+          : query.get("authError") === "origin"
+            ? "This website's sign-in address is configured incorrectly. Contact the project operator."
+            : "Sign-in confirmation failed or expired. Try signing in again, or check the authentication provider configuration.",
       );
     }
   }, []);
@@ -672,6 +689,28 @@ export default function TrustVault() {
         <p>Opening TrustVault…</p>
       </div>
     );
+  if (!session)
+    return (
+      <main className="loading">
+        <ShieldCheck size={42} />
+        <h1>Unable to connect to TrustVault</h1>
+        <p role="alert">
+          {error || "The server could not load sign-in options."}
+        </p>
+        <button
+          className="button primary"
+          onClick={() => {
+            setLoading(true);
+            setError("");
+            refresh()
+              .catch((e) => setError(e.message))
+              .finally(() => setLoading(false));
+          }}
+        >
+          <RefreshCw size={16} /> Try again
+        </button>
+      </main>
+    );
   if (!session?.user && !showSignIn)
     return <PublicWorkspace onSignIn={() => setShowSignIn(true)} />;
   if (!session?.user || !data)
@@ -725,18 +764,20 @@ export default function TrustVault() {
                 ← Browse without signing in
               </button>
             )}
-            {session?.authMode !== "supabase" && (
+            {session.authMode === "tidecloak" || session.demo ? (
               <Badge tone="amber">
                 {session?.demo ? "Local demo mode" : "TideCloak authentication"}
               </Badge>
-            )}
+            ) : null}
             <h2>Welcome to your vault</h2>
             <p className="muted">
               {session?.demo
                 ? "Choose a synthetic identity to explore the complete demonstration."
                 : session?.authMode === "supabase"
                   ? "Use your own account. Your vault is private to your verified identity."
-                  : "Sign in with your university’s configured TideCloak realm."}
+                  : session.authMode === "tidecloak"
+                    ? "Sign in with your university’s configured TideCloak realm."
+                    : "Sign-in is unavailable until the server is configured."}
             </p>
             {error && (
               <div role="alert" className="notice error">
@@ -783,10 +824,16 @@ export default function TrustVault() {
                   setShowSignIn(false);
                 }}
               />
-            ) : (
+            ) : session.authMode === "tidecloak" && session.configured ? (
               <a className="button primary" href="/auth/login">
                 Sign in with TideCloak <ArrowRight size={17} />
               </a>
+            ) : (
+              <div className="notice error" role="alert">
+                {session.authMode === "tidecloak"
+                  ? "TideCloak sign-in is currently unavailable. Contact the project operator."
+                  : "Authentication is not configured. Contact the project operator."}
+              </div>
             )}
             <div className="login-note">
               <LockKeyhole size={17} />

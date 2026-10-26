@@ -5,6 +5,34 @@ import type { User } from "@prisma/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { authenticateSupabase } from "./supabase";
 export const sessionCookie = "tv_session";
+export function tidecloakLoginConfigured() {
+  try {
+    const config = JSON.parse(process.env.TIDECLOAK_CONFIG_JSON || "{}");
+    const issuer = process.env.TIDECLOAK_ISSUER;
+    const client = process.env.TIDECLOAK_CLIENT_ID;
+    if (
+      !issuer ||
+      !client ||
+      !process.env.TIDECLOAK_CLIENT_SECRET ||
+      !process.env.SESSION_SECRET ||
+      process.env.SESSION_SECRET.length < 32 ||
+      typeof config.realm !== "string" ||
+      !config.realm ||
+      typeof config["auth-server-url"] !== "string" ||
+      config.resource !== client
+    )
+      return false;
+    const server = config["auth-server-url"].replace(/\/$/, "");
+    const parsed = new URL(issuer);
+    return (
+      issuer === `${server}/realms/${config.realm}` &&
+      (parsed.protocol === "https:" ||
+        (process.env.NODE_ENV !== "production" && parsed.protocol === "http:"))
+    );
+  } catch {
+    return false;
+  }
+}
 export function isDemo() {
   if (process.env.AUTH_MODE !== "demo") return false;
   if (process.env.NODE_ENV !== "production") return true;

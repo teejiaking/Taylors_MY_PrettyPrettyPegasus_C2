@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
-import { verifyTideToken } from "@/lib/auth";
+import { tidecloakLoginConfigured, verifyTideToken } from "@/lib/auth";
 import { createSupabaseContext } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,9 +10,34 @@ export async function GET(
   { params }: { params: Promise<{ action: string }> },
 ) {
   const { action } = await params;
-  const origin = process.env.APP_ORIGIN || "http://127.0.0.1:3000";
+  const requestOrigin = req.nextUrl.origin;
+  let origin = requestOrigin;
+  let failure = "callback";
   try {
+    // A deployment must never send a failed login to the operator's localhost.
+    if (process.env.APP_ORIGIN) {
+      const configured = new URL(process.env.APP_ORIGIN);
+      const requested = req.nextUrl;
+      // NextURL normalizes loopback addresses to "localhost" internally.
+      const loopback = ["localhost", "127.0.0.1", "[::1]"];
+      const sameLoopback =
+        loopback.includes(configured.hostname) &&
+        loopback.includes(requested.hostname) &&
+        configured.protocol === requested.protocol &&
+        configured.port === requested.port;
+      if (configured.origin !== requestOrigin && !sameLoopback) {
+        failure = "origin";
+        throw new Error("APP_ORIGIN does not match this website.");
+      }
+      origin = configured.origin;
+    }
     if (process.env.AUTH_MODE === "supabase") {
+      // Preserve Supabase sign-in for old links from a previously loaded client.
+      if (action === "login") {
+        const res = NextResponse.redirect(origin + "/?signIn=1");
+        res.headers.set("Cache-Control", "no-store");
+        return res;
+      }
       const context = createSupabaseContext(req);
       let ok = false;
       if (action === "callback" && req.nextUrl.searchParams.get("code")) {
@@ -36,8 +61,10 @@ export async function GET(
         NextResponse.redirect(origin + (ok ? "" : "/?authError=1")),
       );
     }
-    if (process.env.AUTH_MODE !== "tidecloak")
+    if (process.env.AUTH_MODE !== "tidecloak" || !tidecloakLoginConfigured()) {
+      failure = "configuration";
       throw new Error("TideCloak is not configured.");
+    }
     const issuer = process.env.TIDECLOAK_ISSUER,
       client = process.env.TIDECLOAK_CLIENT_ID,
       clientSecret = process.env.TIDECLOAK_CLIENT_SECRET;
@@ -138,12 +165,12 @@ export async function GET(
         Math.min(Number(claims.exp) - Math.floor(Date.now() / 1000), 3600),
       ),
     });
-    res.cookies.delete("tv_oidc");
+    res.cookies.delete({ name: "tv_oidc", path: "/auth" });
     res.headers.set("Cache-Control", "no-store");
     return res;
   } catch {
-    const res = NextResponse.redirect(origin + "/?authError=1");
-    res.cookies.delete("tv_oidc");
+    const res = NextResponse.redirect(requestOrigin + "/?authError=" + failure);
+    res.cookies.delete({ name: "tv_oidc", path: "/auth" });
     res.headers.set("Cache-Control", "no-store");
     return res;
   }
