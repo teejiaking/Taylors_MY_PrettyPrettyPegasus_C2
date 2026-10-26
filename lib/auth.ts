@@ -2,8 +2,6 @@ import { SignJWT, jwtVerify } from "jose";
 import { db } from "./db";
 import { AppError } from "./storage";
 import type { User } from "@prisma/client";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { authenticateSupabase } from "./supabase";
 export const sessionCookie = "tv_session";
 export function tidecloakLoginConfigured() {
   try {
@@ -111,12 +109,7 @@ export async function verifyTideToken(token: string) {
     );
   return { user, claims };
 }
-export async function authenticate(
-  req: Request,
-  supabase?: SupabaseClient,
-): Promise<User> {
-  if (process.env.AUTH_MODE === "supabase")
-    return authenticateSupabase(req, supabase);
+export async function authenticate(req: Request): Promise<User> {
   if (isDemo()) {
     const token = getCookie(req, sessionCookie);
     if (!token) throw new AppError(401, "Sign in to continue.");

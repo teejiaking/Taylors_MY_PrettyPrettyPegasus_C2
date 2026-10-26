@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { z } from "zod";
-import {
-  createSupabaseContext,
-  supabaseConfigured,
-  supabaseCredentials,
-} from "@/lib/supabase";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { db } from "@/lib/db";
 import {
   authenticate,
@@ -33,17 +26,23 @@ function json(data: unknown, status = 200) {
 async function dispatch(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
-  supabase?: SupabaseClient,
 ) {
   const { path } = await params;
   const route = path.join("/");
   try {
+    if (process.env.VERCEL === "1")
+      return json(
+        {
+          error:
+            "The hosted app is a browser demo; server accounts and storage are not enabled.",
+        },
+        503,
+      );
     if (req.method === "POST") assertSameOrigin(req);
     if (route === "session" && req.method === "GET") {
       let user = null;
       try {
-        if (process.env.AUTH_MODE !== "supabase" || supabase)
-          user = await authenticate(req, supabase);
+        user = await authenticate(req);
       } catch (e) {
         if (!(e instanceof AppError)) throw e;
       }
@@ -73,35 +72,9 @@ async function dispatch(
         authMode: process.env.AUTH_MODE || "unconfigured",
         configured:
           isDemo() ||
-          (process.env.AUTH_MODE === "supabase" && supabaseConfigured()) ||
           (process.env.AUTH_MODE === "tidecloak" && tidecloakLoginConfigured()),
         identities,
       });
-    }
-    if (route.startsWith("auth/supabase/") && req.method === "POST") {
-      if (process.env.AUTH_MODE !== "supabase")
-        throw new AppError(403, "Supabase authentication is not enabled.");
-      if (!supabase)
-        throw new AppError(
-          503,
-          "Configure SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY to enable real sign-in.",
-        );
-      if (!["auth/supabase/login", "auth/supabase/signup"].includes(route))
-        throw new AppError(404, "Unknown sign-in action.");
-      if (Number(req.headers.get("content-length")) > 16384)
-        throw new AppError(413, "Authentication request is too large.");
-      const signup = route.endsWith("/signup");
-      const credentials = z
-        .object({
-          email: z.email().max(254),
-          password: z
-            .string()
-            .min(signup ? 6 : 1)
-            .max(256),
-          name: z.string().trim().min(2).max(100).optional(),
-        })
-        .parse(await req.json());
-      return json(await supabaseCredentials(supabase, credentials, signup));
     }
     if (route === "demo/login" && req.method === "POST") {
       if (!isDemo())
@@ -121,20 +94,12 @@ async function dispatch(
       return res;
     }
     if (route === "logout" && req.method === "POST") {
-      if (supabase) {
-        const { error } = await supabase.auth.signOut({ scope: "local" });
-        if (error)
-          throw new AppError(
-            503,
-            "Supabase sign-out could not complete. Try again.",
-          );
-      }
       const res = json({ ok: true });
       res.cookies.delete(sessionCookie);
       res.cookies.delete("tv_tide");
       return res;
     }
-    const user = await authenticate(req, supabase);
+    const user = await authenticate(req);
     if (route === "documents/samples" && req.method === "POST")
       return json(await service.addSamples(user), 201);
     if (route === "overview" && req.method === "GET")
@@ -243,28 +208,5 @@ async function dispatch(
     );
   }
 }
-async function handler(
-  req: NextRequest,
-  ctx: { params: Promise<{ path: string[] }> },
-) {
-  try {
-    const context =
-      process.env.AUTH_MODE === "supabase" && supabaseConfigured()
-        ? createSupabaseContext(req)
-        : null;
-    const res = await dispatch(req, ctx, context?.client);
-    return context ? context.apply(res) : res;
-  } catch (error) {
-    return json(
-      {
-        error:
-          error instanceof AppError
-            ? error.message
-            : "Authentication service is unavailable.",
-      },
-      error instanceof AppError ? error.status : 503,
-    );
-  }
-}
-export const GET = handler;
-export const POST = handler;
+export const GET = dispatch;
+export const POST = dispatch;

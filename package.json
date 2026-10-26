@@ -5,46 +5,40 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --webpack --hostname 127.0.0.1",
-    "demo": "tsx scripts/demo-server.ts",
     "build": "next build --webpack",
+    "start": "next start --hostname 127.0.0.1",
+    "test": "tsx --test tests/browser-workspace.test.ts",
+    "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/generate.mjs",
     "db:generate": "node scripts/generate.mjs",
-    "start": "next start --hostname 127.0.0.1",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:migrate:hosted": "node scripts/migrate-hosted.mjs",
-    "storage:setup": "tsx scripts/setup-storage.ts",
-    "db:seed": "tsx scripts/seed.ts",
-    "demo:setup": "tsx scripts/setup.ts",
-    "setup": "tsx scripts/setup.ts --supabase",
-    "demo:reset": "tsx scripts/reset.ts",
-    "test": "tsx scripts/test.ts",
-    "test:http": "tsx scripts/http-smoke.ts",
-    "test:supabase": "tsx scripts/supabase-smoke.ts",
-    "typecheck": "tsc --noEmit",
-    "auth:provision": "tsx scripts/provision.ts"
+    "auth:provision": "tsx scripts/provision.ts",
+    "setup:server": "tsx scripts/setup.ts",
+    "test:server": "tsx scripts/test.ts"
   },
   "dependencies": {
-    "@prisma/client": "6.19.0",
-    "@supabase/ssr": "0.12.7",
-    "@supabase/supabase-js": "2.118.0",
-    "@tidecloak/nextjs": "0.14.40",
-    "jose": "^6.1.0",
     "lucide-react": "^0.468.0",
     "next": "16.2.12",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "@prisma/client": "6.19.0",
+    "@tidecloak/nextjs": "0.14.40",
+    "jose": "^6.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "dotenv": "^17.2.0",
     "prettier": "3.6.2",
-    "prisma": "6.19.0",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "prisma": "6.19.0",
+    "dotenv": "^17.2.0"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

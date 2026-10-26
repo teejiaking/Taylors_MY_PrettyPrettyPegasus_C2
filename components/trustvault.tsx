@@ -17,7 +17,6 @@ import {
   X,
   Clock3,
   ChevronRight,
-  LogOut,
   Building2,
   Fingerprint,
   UploadCloud,
@@ -30,8 +29,7 @@ import {
   Users,
 } from "lucide-react";
 import { fieldLabels } from "@/lib/guardian";
-import SupabaseAuth from "./supabase-auth";
-import PublicWorkspace from "./public-workspace";
+import { browserApi, browserPreview } from "@/lib/browser-workspace";
 type Identity = {
   id: string;
   name: string;
@@ -74,10 +72,16 @@ type Grant = {
   state: string;
   expiresAt: string;
   consentAt: string;
-  document: { title: string };
+  document: {
+    title: string;
+  };
   recipient?: Identity;
-  owner?: { name: string };
-  request: { purpose: string };
+  owner?: {
+    name: string;
+  };
+  request: {
+    purpose: string;
+  };
 };
 type Proposal = {
   id: string;
@@ -101,13 +105,19 @@ type Event = {
 };
 type Data = {
   user: Identity;
-  policy: { maxDurationHours: number; version: number };
+  policy: {
+    maxDurationHours: number;
+    version: number;
+  };
   documents?: Doc[];
   requests?: RequestItem[];
   grants?: Grant[];
   proposals?: Proposal[];
   activity: Event[];
-  students?: { id: string; name: string }[];
+  students?: {
+    id: string;
+    name: string;
+  }[];
 };
 const fmt = (d: string) =>
   new Date(d).toLocaleString("en-GB", {
@@ -127,29 +137,7 @@ const roleName = (s: string) =>
       ? "Recipient"
       : "Student";
 const readable = (s: string) => s.toLowerCase().replaceAll("_", " ");
-async function api<T = unknown>(
-  url: string,
-  method = "GET",
-  body?: unknown,
-): Promise<T> {
-  const res = await fetch("/api/" + url, {
-    method,
-    cache: "no-store",
-    headers:
-      body && !(body instanceof FormData)
-        ? { "Content-Type": "application/json" }
-        : undefined,
-    body:
-      body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.headers.get("content-type")?.includes("application/json"))
-    throw new Error(
-      "The server is temporarily unavailable. Reload the workspace and try again.",
-    );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Request failed.");
-  return data;
-}
+const api = browserApi;
 function Badge({
   children,
   tone = "neutral",
@@ -173,14 +161,10 @@ function FileIcon({ kind = "enrolment" }: { kind?: string }) {
 }
 export default function TrustVault() {
   const [session, setSession] = useState<{
-      user: Identity | null;
-      demo: boolean;
-      authMode: string;
-      configured: boolean;
+      user: Identity;
       identities: Identity[];
     } | null>(null),
     [data, setData] = useState<Data | null>(null),
-    [showSignIn, setShowSignIn] = useState(false),
     [page, setPage] = useState("dashboard"),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
@@ -200,44 +184,18 @@ export default function TrustVault() {
       source: string;
     } | null>(null);
   async function refresh() {
-    const s = await api<{
-      user: Identity | null;
-      demo: boolean;
-      authMode: string;
-      configured: boolean;
+    const nextSession = await api<{
+      user: Identity;
       identities: Identity[];
     }>("session");
-    setSession(s);
-    if (s.user) {
-      setData(await api<Data>("overview"));
-      const url = new URL(window.location.href);
-      if (url.searchParams.has("authError") || url.searchParams.has("signIn")) {
-        url.searchParams.delete("authError");
-        url.searchParams.delete("signIn");
-        window.history.replaceState(
-          null,
-          "",
-          url.pathname + url.search + url.hash,
-        );
-      }
-    } else setData(null);
+    const nextData = await api<Data>("overview");
+    setSession(nextSession);
+    setData(nextData);
   }
   useEffect(() => {
     refresh()
-      .catch((e) => setError(e.message))
+      .catch((error) => setError(error.message))
       .finally(() => setLoading(false));
-    const query = new URLSearchParams(location.search);
-    if (query.has("signIn")) setShowSignIn(true);
-    if (query.has("authError")) {
-      setShowSignIn(true);
-      setError(
-        query.get("authError") === "configuration"
-          ? "Sign-in is not configured on this website. Contact the project operator."
-          : query.get("authError") === "origin"
-            ? "This website's sign-in address is configured incorrectly. Contact the project operator."
-            : "Sign-in confirmation failed or expired. Try signing in again, or check the authentication provider configuration.",
-      );
-    }
   }, []);
   useEffect(() => {
     if (toast) {
@@ -301,15 +259,14 @@ export default function TrustVault() {
       setBusy(false);
     }
   }
-  async function login(id: string) {
+  async function switchIdentity(id: string) {
     if (
       await act(
-        () => api("demo/login", "POST", { userId: id }),
+        () => api("identity", "POST", { userId: id }),
         "Demo identity selected.",
       )
     ) {
       setPage("dashboard");
-      setShowSignIn(false);
       setReview(null);
       setShare(null);
       setModal(null);
@@ -393,6 +350,30 @@ export default function TrustVault() {
       setBusy(false);
     }
   }
+  function previewDocument(id: string) {
+    try {
+      const url = browserPreview(id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Unable to open the document.",
+      );
+    }
+  }
+  async function resetWorkspace() {
+    if (
+      await act(
+        () => api("demo/reset", "POST"),
+        "Demo reset. Sample documents and requests restored.",
+      )
+    ) {
+      setPage("dashboard");
+      setReview(null);
+      setShare(null);
+      setModal(null);
+      setMobile(false);
+    }
+  }
   async function formSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -400,7 +381,7 @@ export default function TrustVault() {
     if (modal === "upload")
       ok = await act(
         () => api("documents", "POST", f),
-        "Document encrypted and added to your vault.",
+        "Document added to this browser tab.",
       );
     if (modal === "request")
       ok = await act(
@@ -689,13 +670,13 @@ export default function TrustVault() {
         <p>Opening TrustVault…</p>
       </div>
     );
-  if (!session)
+  if (!session || !data)
     return (
       <main className="loading">
         <ShieldCheck size={42} />
-        <h1>Unable to connect to TrustVault</h1>
+        <h1>Unable to open TrustVault</h1>
         <p role="alert">
-          {error || "The server could not load sign-in options."}
+          {error || "The browser workspace could not be opened."}
         </p>
         <button
           className="button primary"
@@ -709,145 +690,6 @@ export default function TrustVault() {
         >
           <RefreshCw size={16} /> Try again
         </button>
-      </main>
-    );
-  if (!session?.user && !showSignIn)
-    return <PublicWorkspace onSignIn={() => setShowSignIn(true)} />;
-  if (!session?.user || !data)
-    return (
-      <main className="login-page">
-        <section className="login-story">
-          <div className="brand">
-            <div className="brand-mark">
-              <ShieldCheck />
-            </div>
-            TrustVault
-            <span className="brand-dot" />
-          </div>
-          <span className="eyebrow">LESS EXPOSURE. MORE CONTROL.</span>
-          <h1>
-            Your information.
-            <br />
-            <em>Your decision.</em>
-          </h1>
-          <p>
-            A private home for your student documents. Review every request and
-            share only what feels right.
-          </p>
-          <div className="login-illustration">
-            <div className="floating-file">
-              <FileText size={30} />
-              <span>Enrolment confirmation</span>
-              <Badge tone="teal">Shared with consent</Badge>
-            </div>
-            <div className="lock-orbit">
-              <LockKeyhole size={55} />
-            </div>
-            <span className="encrypted-pill">
-              <ShieldCheck size={15} /> Encrypted in your vault
-            </span>
-          </div>
-          <div className="login-bottom">
-            Built for students. Designed around consent.
-          </div>
-        </section>
-        <section className="login-form">
-          <div className="login-box">
-            {!session?.user && (
-              <button
-                className="text-button public-back"
-                onClick={() => {
-                  setShowSignIn(false);
-                  setError("");
-                }}
-              >
-                ← Browse without signing in
-              </button>
-            )}
-            {session.authMode === "tidecloak" || session.demo ? (
-              <Badge tone="amber">
-                {session?.demo ? "Local demo mode" : "TideCloak authentication"}
-              </Badge>
-            ) : null}
-            <h2>Welcome to your vault</h2>
-            <p className="muted">
-              {session?.demo
-                ? "Choose a synthetic identity to explore the complete demonstration."
-                : session?.authMode === "supabase"
-                  ? "Use your own account. Your vault is private to your verified identity."
-                  : session.authMode === "tidecloak"
-                    ? "Sign in with your university’s configured TideCloak realm."
-                    : "Sign-in is unavailable until the server is configured."}
-            </p>
-            {error && (
-              <div role="alert" className="notice error">
-                {error}
-              </div>
-            )}
-            {session?.demo ? (
-              <div className="identity-list">
-                {session.identities.map((i) => (
-                  <button
-                    className="identity"
-                    disabled={busy}
-                    key={i.id}
-                    onClick={() => login(i.id)}
-                  >
-                    <span
-                      className={`avatar ${i.role === "STUDENT" ? "teal-bg" : ""}`}
-                    >
-                      {i.name
-                        .split(" ")
-                        .map((w) => w[0])
-                        .join("")}
-                    </span>
-                    <span className="grow">
-                      <strong>{i.name}</strong>
-                      <small>
-                        {roleName(i.role)} ·{" "}
-                        {i.organisation
-                          ? "CampusNest simulation"
-                          : "Local demo identity"}
-                      </small>
-                    </span>
-                    <ArrowRight size={18} />
-                  </button>
-                ))}
-              </div>
-            ) : session?.authMode === "supabase" ? (
-              <SupabaseAuth
-                configured={session.configured}
-                onAuthenticated={async () => {
-                  setError("");
-                  await refresh();
-                  setPage("dashboard");
-                  setShowSignIn(false);
-                }}
-              />
-            ) : session.authMode === "tidecloak" && session.configured ? (
-              <a className="button primary" href="/auth/login">
-                Sign in with TideCloak <ArrowRight size={17} />
-              </a>
-            ) : (
-              <div className="notice error" role="alert">
-                {session.authMode === "tidecloak"
-                  ? "TideCloak sign-in is currently unavailable. Contact the project operator."
-                  : "Authentication is not configured. Contact the project operator."}
-              </div>
-            )}
-            <div className="login-note">
-              <LockKeyhole size={17} />
-              <span>
-                Synthetic data only.{" "}
-                {session?.demo
-                  ? "Simulated local accounts. Normal production startup disables demo authentication."
-                  : session?.authMode === "supabase"
-                    ? "Real accounts. Document contents remain synthetic. No demo identity switching."
-                    : "Provisioned accounts and matching realm roles are required."}
-              </span>
-            </div>
-          </div>
-        </section>
       </main>
     );
   const titles: Record<string, [string, string]> = {
@@ -875,10 +717,7 @@ export default function TrustVault() {
       "Sharing centre",
       "Every permission has a purpose, a time limit, and an off switch.",
     ],
-    portal: [
-      "Recipient portal",
-      "A simulated accommodation service with authenticated access.",
-    ],
+    portal: ["Recipient portal", "Try the recipient side of the consent flow."],
     governance: [
       "Policy governance",
       "Every change needs two different administrators.",
@@ -948,17 +787,10 @@ export default function TrustVault() {
             </span>
             <div className="grow">
               <strong>{data.user.name}</strong>
-              <small>{roleName(data.user.role)} account</small>
+              <small>
+                {roleName(data.user.role)} {"demo"}
+              </small>
             </div>
-            <button
-              title="Sign out"
-              aria-label="Sign out"
-              className="icon-button"
-              disabled={busy}
-              onClick={() => act(() => api("logout", "POST"), "Signed out.")}
-            >
-              <LogOut size={17} />
-            </button>
           </div>
         </div>
       </aside>
@@ -982,17 +814,26 @@ export default function TrustVault() {
             </span>
           </div>
           <div className="row top-actions">
+            {
+              <button
+                className="button ghost small-button"
+                disabled={busy}
+                onClick={resetWorkspace}
+              >
+                <RefreshCw size={15} /> Reset demo
+              </button>
+            }
             <span className="synthetic-label">
               <span /> Synthetic data only
             </span>
-            {session.demo && (
+            {
               <label className="identity-switch">
                 <span className="sr-only">Switch demo identity</span>
                 <select
                   aria-label="Switch demo identity"
                   value={data.user.id}
                   disabled={busy}
-                  onChange={(e) => login(e.target.value)}
+                  onChange={(e) => switchIdentity(e.target.value)}
                 >
                   {session.identities.map((i) => (
                     <option key={i.id} value={i.id}>
@@ -1001,7 +842,7 @@ export default function TrustVault() {
                   ))}
                 </select>
               </label>
-            )}
+            }
             <span className="avatar top-avatar">
               {data.user.name
                 .split(" ")
@@ -1013,16 +854,12 @@ export default function TrustVault() {
         <div className="demo-bar">
           <span>
             <Fingerprint size={15} />
-            {session.demo
-              ? "LOCAL DEMO MODE"
-              : session.authMode === "supabase"
-                ? "SUPABASE AUTHENTICATION"
-                : "TIDECLOAK AUTHENTICATION"}
+            {"BROWSER DEMO"}
           </span>
           <p>
-            {session.demo
-              ? "Simulated identities and organisations. You are in a safe demonstration workspace."
-              : `Identity verified with ${session.authMode === "supabase" ? "Supabase" : "TideCloak"}. Sharing and governance are enforced by TrustVault.`}
+            {
+              "No account needed. Files and actions stay in this tab and reset on reload."
+            }
           </p>
           <LockKeyhole size={14} />
         </div>
@@ -1091,7 +928,7 @@ export default function TrustVault() {
                         label: "Private documents",
                         value: data.documents?.length ?? 0,
                         icon: FolderLock,
-                        note: "Encrypted & owned by you",
+                        note: "Available in this tab",
                         color: "blue",
                       },
                       {
@@ -1241,9 +1078,7 @@ export default function TrustVault() {
                                     "Recipient organisation"}
                                 </h3>
                                 <p className="muted small">
-                                  {session.demo
-                                    ? "Student accommodation · simulated"
-                                    : "Verified recipient · synthetic document request"}
+                                  {"Student accommodation · simulated"}
                                 </p>
                               </div>
                               <Badge
@@ -1296,13 +1131,7 @@ export default function TrustVault() {
                           <button
                             key={d.id}
                             className="compact-doc"
-                            onClick={() =>
-                              window.open(
-                                `/api/documents/${d.id}/preview`,
-                                "_blank",
-                                "noopener,noreferrer",
-                              )
-                            }
+                            onClick={() => previewDocument(d.id)}
                           >
                             <FileIcon kind={d.kind} />
                             <span className="grow">
@@ -1318,8 +1147,8 @@ export default function TrustVault() {
                           </button>
                         ))}
                         <div className="vault-note">
-                          <ShieldCheck size={15} /> Only you can open original
-                          documents.
+                          <ShieldCheck size={15} />{" "}
+                          {"Files stay in this browser tab."}
                         </div>
                       </div>
                     </section>
@@ -1332,8 +1161,12 @@ export default function TrustVault() {
                     <span>
                       <strong>{data.user.organisation}</strong>
                       <br />
-                      Requests are tied to this provisioned recipient identity.
-                      Each access is rechecked by the server.
+                      {
+                        "Try requesting and viewing selected sample information."
+                      }
+                      {
+                        "Switch demo identities to try both sides of the consent flow."
+                      }
                     </span>
                   </div>
                   <div className="section-heading">
@@ -1354,9 +1187,9 @@ export default function TrustVault() {
                     <span>
                       <strong>Application-level dual approval</strong>
                       <br />
-                      TideCloak native IAM governance is documented but is not
-                      used for this local application policy. Administrators
-                      have no access to student documents.
+                      {
+                        "Switch between Jordan and Sam to try independent review. This is a simulation in your browser."
+                      }
                     </span>
                   </div>
                   {proposals()}
@@ -1448,15 +1281,13 @@ export default function TrustVault() {
                     <div className="small muted source-note">
                       {d.attributeSource}
                     </div>
-                    <a
+                    <button
                       className="button full-width"
-                      href={`/api/documents/${d.id}/preview`}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => previewDocument(d.id)}
                     >
-                      <Eye size={16} /> Owner-only preview{" "}
+                      <Eye size={16} /> Preview document{" "}
                       <ArrowUpRight size={15} />
-                    </a>
+                    </button>
                   </article>
                 ))}
                 <button
@@ -1499,10 +1330,8 @@ export default function TrustVault() {
                 <span>
                   <strong>{data.user.organisation}</strong>
                   <br />
-                  {session.demo
-                    ? "Verified demo account"
-                    : "Verified account"}: {data.user.email}. Grant access is
-                  tied to this identity.
+                  {"Demo identity"}: {data.user.email}. Grant access is tied to
+                  this identity.
                 </span>
               </div>
               <div className="section-heading">
@@ -1536,7 +1365,7 @@ export default function TrustVault() {
                     duration
                   </h2>
                 </div>
-                <Badge tone="teal">Enforced on the server</Badge>
+                <Badge tone="teal">{"Demo sharing policy"}</Badge>
               </div>
               <div className="notice info">
                 <Users size={20} />
@@ -1544,8 +1373,10 @@ export default function TrustVault() {
                   <strong>Application-level two-person approval.</strong>{" "}
                   Proposals are immutable. A different administrator must
                   approve or reject. Pending and rejected proposals never change
-                  policy. This does not prevent a database owner or host
-                  administrator from bypassing application controls.
+                  policy.{" "}
+                  {
+                    "Demo role switching simulates this workflow; it is not real authentication."
+                  }
                 </span>
               </div>
               {proposals()}
@@ -1614,7 +1445,7 @@ export default function TrustVault() {
                 </h2>
                 <p className="muted">
                   {modal === "upload"
-                    ? "Use a small synthetic document. It will be encrypted on the server."
+                    ? "Use a synthetic PDF, PNG or JPEG. It stays in this tab until you reload or reset."
                     : modal === "request"
                       ? "Give the student a clear reason for every attribute you request."
                       : "The current policy stays active until a different administrator approves."}
@@ -1664,7 +1495,7 @@ export default function TrustVault() {
                         {data.students?.map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.name}
-                            {session.demo ? " · synthetic identity" : ""}
+                            {" · synthetic identity"}
                           </option>
                         ))}
                       </select>
@@ -1748,7 +1579,7 @@ export default function TrustVault() {
                   {busy
                     ? "Saving…"
                     : modal === "upload"
-                      ? "Encrypt & upload"
+                      ? "Add to this tab"
                       : modal === "request"
                         ? "Send request for consent"
                         : "Submit immutable proposal"}{" "}
@@ -1769,10 +1600,7 @@ export default function TrustVault() {
                   <div>
                     <h3>{review.recipient?.organisation}</h3>
                     <span className="small muted">
-                      {session.demo
-                        ? "Verified demo account"
-                        : "Verified recipient account"}
-                      : {review.recipient?.email}
+                      {"Demo identity"}: {review.recipient?.email}
                     </span>
                   </div>
                 </div>
@@ -1931,10 +1759,10 @@ export default function TrustVault() {
             )}
             {share && (
               <>
-                <span className="eyebrow">AUTHENTICATED RECIPIENT ACCESS</span>
+                <span className="eyebrow">{"SIMULATED RECIPIENT ACCESS"}</span>
                 <h2 id="dialog-title">Just what was approved.</h2>
                 <p className="muted">{share.purpose}</p>
-                <Badge tone="teal">Access verified by the server</Badge>
+                <Badge tone="teal">{"Demo permission checked"}</Badge>
                 <div className="shared-attributes">
                   {Object.entries(share.attributes).map(([k, v]) => (
                     <div key={k}>

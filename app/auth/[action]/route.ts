@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { tidecloakLoginConfigured, verifyTideToken } from "@/lib/auth";
-import { createSupabaseContext } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ action: string }> },
 ) {
+  if (process.env.VERCEL === "1")
+    return NextResponse.redirect(new URL("/", req.url));
   const { action } = await params;
   const requestOrigin = req.nextUrl.origin;
   let origin = requestOrigin;
@@ -30,36 +31,6 @@ export async function GET(
         throw new Error("APP_ORIGIN does not match this website.");
       }
       origin = configured.origin;
-    }
-    if (process.env.AUTH_MODE === "supabase") {
-      // Preserve Supabase sign-in for old links from a previously loaded client.
-      if (action === "login") {
-        const res = NextResponse.redirect(origin + "/?signIn=1");
-        res.headers.set("Cache-Control", "no-store");
-        return res;
-      }
-      const context = createSupabaseContext(req);
-      let ok = false;
-      if (action === "callback" && req.nextUrl.searchParams.get("code")) {
-        const { error } = await context.client.auth.exchangeCodeForSession(
-          req.nextUrl.searchParams.get("code")!,
-        );
-        ok = !error;
-      }
-      if (
-        action === "confirm" &&
-        req.nextUrl.searchParams.get("token_hash") &&
-        req.nextUrl.searchParams.get("type") === "email"
-      ) {
-        const { error } = await context.client.auth.verifyOtp({
-          token_hash: req.nextUrl.searchParams.get("token_hash")!,
-          type: "email",
-        });
-        ok = !error;
-      }
-      return context.apply(
-        NextResponse.redirect(origin + (ok ? "" : "/?authError=1")),
-      );
     }
     if (process.env.AUTH_MODE !== "tidecloak" || !tidecloakLoginConfigured()) {
       failure = "configuration";

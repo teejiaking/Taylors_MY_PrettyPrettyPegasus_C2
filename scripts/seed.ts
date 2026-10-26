@@ -10,7 +10,7 @@ export async function seed() {
     process.env.AUTH_MODE !== "demo" ||
     process.env.NODE_ENV === "production" ||
     databaseBackend() !== "sqlite" ||
-    process.env.STORAGE_BACKEND === "supabase"
+    process.env.VERCEL === "1"
   )
     throw new Error("Synthetic seeding is restricted to local demo mode.");
   const old = await db.document.findMany({ select: { storageId: true } });

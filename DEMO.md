@@ -1,19 +1,15 @@
 # TrustVault: two-minute demonstration
 
-For the current no-login website, use [the ElevenLabs guest-preview script and timed screen cues](DEMO_GUEST_2MIN.md). The walkthrough below is for the separate signed-in or optional local-demo account journey.
-
-**Current real-account mode:** use `npm start` after configuring Supabase and building. Create and confirm real student/recipient/two-administrator accounts, provision staff roles as described in SUPABASE.md, and add synthetic samples as the student. Perform the same journey below by signing out/in or using separate browser profiles; the identity dropdown exists only in the optional local demo. Do not run `demo:reset` on a real-account deployment; the command refuses Supabase mode.
-
-Before presenting: run `npm run build`, start `npm run demo`, run `npm run demo:reset` in another terminal, and reload http://127.0.0.1:3000. Have `examples/synthetic-upload.pdf` ready in the file picker. All people, organisations, identifiers and documents are synthetic. `npm run dev` is available for source editing; the compiled demo avoids development-server manifest races on this Windows host.
+Run npm ci and npm run dev, or open the Vercel deployment. No account or external service is required. The app opens as Maya. Use Reset demo before presenting; all data is synthetic and held in this tab's memory.
 
 | Time | Action and narration |
 | --- | --- |
-| 0:00–0:15 | Choose **Maya Chen**. “Students repeatedly send full documents when a service needs only a confirmation. TrustVault makes the decision visible and reversible.” Show vault counts and the Local demo mode label. |
-| 0:15–0:30 | **Upload document** → title “Synthetic upload demo” → select `examples/synthetic-upload.pdf` → **Encrypt & upload**. Open the vault. “Original files are encrypted on the server and only the owner can preview them. Uploads are clearly marked as not extracted or verified.” |
-| 0:30–0:55 | **Overview → Review requests** opens the excessive CampusNest request. “They need student status but asked for a passport number, address and insurance policy number. Our rules-based Guardian flags those three fields and suggests enrolment confirmation.” Keep only the enrolment checkbox checked, enter **12** hours and approve. “This shares a synthetic attribute, not a redacted PDF.” |
-| 0:55–1:15 | Header identity switch → **Alex Morgan · Recipient**. Open the newest **View shared information**. Show only “Enrolment confirmation: Currently enrolled.” “The server returned exactly the approved field. Original files and other identifiers are absent.” Close the dialog. |
-| 1:15–1:35 | Switch to **Maya Chen**, open **Sharing centre**, revoke the newest 12-hour grant. Switch back to **Alex**, choose **Check access** on that revoked grant. Show denial. “Every access rechecks identity, expiry, revocation and current policy. Revocation blocks future access; it cannot erase earlier copies.” |
-| 1:35–1:55 | Switch to **Jordan Lee**, open **Governance**. Show the pending 7-day → 14-day proposal and the unchanged 7-day applied policy. Jordan cannot approve their own proposal. Switch to **Sam Rivera**, open **Governance**, **Approve & apply**. Show the new policy version and 14-day maximum. |
-| 1:55–2:00 | “Two distinct administrators, one immutable proposal, one transactional application. This is application-level governance. TideCloak real authentication is wired through its documented verifier; this presentation uses clearly labelled local demo accounts.” |
+| 0:00–0:15 | Show Maya's document vault: three fictional documents. Explain that the browser demo needs no sign-in. |
+| 0:15–0:30 | Upload examples/synthetic-upload.pdf with a title, then preview it. Files stay in this tab and are cleared on reload. Uploaded files have no extracted attributes. |
+| 0:30–0:55 | Open the excessive CampusNest request. Guardian flags passport, address and insurance identifiers. Approve only enrolment confirmation for 12 hours. |
+| 0:55–1:15 | Switch to Alex Morgan with the header selector. Open the new grant in Recipient portal. Only the selected enrolment attribute is displayed. |
+| 1:15–1:35 | Switch to Maya, revoke the new grant from Sharing centre, then switch to Alex and Check access. Access is denied and recorded. Seeded expired and revoked grants also deny access. |
+| 1:35–1:55 | Switch to Jordan and open Governance. The proposal is still pending; Jordan cannot approve their own proposal. Switch to Sam and Approve & apply. The policy changes from seven to fourteen days. |
+| 1:55–2:00 | Show Activity log. Explain that identities and two-person approval are simulated in this tab. Reload or Reset demo restores the examples. |
 
-If there is extra time: in the recipient portal, test the seeded expired and revoked grants; both deny access. Submit a new recipient request, then reject it as Maya. Open Activity log to show successful and denied outcomes. Local identity switching is a demonstration aid, not production authentication.
+This is a browser demonstration, not a real multi-user document service. Guardian uses deterministic rules. Approved attributes come from labelled fictional sample documents, not PDF redaction or OCR. Revocation blocks later demo access; it cannot erase information already viewed.
