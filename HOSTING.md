@@ -6,18 +6,19 @@ TrustVault uses Supabase email/password authentication, PostgreSQL records, and 
 
 Set the following in the Vercel project's **Production** environment. Never prefix these keys with `NEXT_PUBLIC_`, commit their values, or paste secret values into chat.
 
-| Variable                   | Value                                                                               |
-| -------------------------- | ----------------------------------------------------------------------------------- |
-| `AUTH_MODE`                | `supabase`                                                                          |
-| `APP_ORIGIN`               | Exact HTTPS production origin without a trailing slash                              |
-| `SUPABASE_URL`             | Supabase project URL                                                                |
-| `SUPABASE_PUBLISHABLE_KEY` | Project publishable key (or legacy anon key)                                        |
-| `DATABASE_BACKEND`         | `supabase`                                                                          |
-| `SUPABASE_DATABASE_URL`    | Project PostgreSQL connection string                                                |
-| `STORAGE_BACKEND`          | `supabase`                                                                          |
-| `SUPABASE_SECRET_KEY`      | Server-only secret key or legacy service-role key, used for private Storage         |
-| `SUPABASE_STORAGE_BUCKET`  | `trustvault-documents`                                                              |
-| `DOCUMENT_ENCRYPTION_KEY`  | 32 random bytes encoded as 64 hex characters; retain it to decrypt existing uploads |
+| Variable                          | Value                                                                                     |
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `AUTH_MODE`                       | `supabase`                                                                                |
+| `APP_ORIGIN`                      | Exact HTTPS production origin without a trailing slash                                    |
+| `SUPABASE_URL`                    | Supabase project URL                                                                      |
+| `SUPABASE_PUBLISHABLE_KEY`        | Project publishable key (or legacy anon key)                                              |
+| `DATABASE_BACKEND`                | `supabase`                                                                                |
+| `SUPABASE_DATABASE_URL`           | Project PostgreSQL connection string                                                      |
+| `SUPABASE_MIGRATION_DATABASE_URL` | Session pooler URL for production-build migrations; falls back to `SUPABASE_DATABASE_URL` |
+| `STORAGE_BACKEND`                 | `supabase`                                                                                |
+| `SUPABASE_SECRET_KEY`             | Server-only secret key or legacy service-role key, used for private Storage               |
+| `SUPABASE_STORAGE_BUCKET`         | `trustvault-documents`                                                                    |
+| `DOCUMENT_ENCRYPTION_KEY`         | 32 random bytes encoded as 64 hex characters; retain it to decrypt existing uploads       |
 
 For migrations use the **Session pooler** connection on port 5432. For the Vercel runtime use the **Transaction pooler** connection on port 6543. The application adds `pgbouncer=true` for that port, limits its Prisma connection pool to one connection per instance by default, and selects the private `trustvault` schema. Set `sslmode=require` or stronger TLS verification in the connection URL. Do not disable certificate validation.
 
@@ -52,7 +53,7 @@ Enable email/password signup in the existing Supabase project. Set its Site URL 
 
 ## Deploy and verify
 
-Import the GitHub repository into the intended Vercel team, choose the repository root, Next.js and Node 24, and deploy the reviewed commit after migrations and environment setup. `npm ci` generates both Prisma clients. `vercel.json` and `next.config.ts` use the standard `.next` build directory on Vercel.
+Import the GitHub repository into the intended Vercel team, choose the repository root, Next.js and Node 24, and deploy the reviewed commit after environment setup. `npm ci` generates both Prisma clients. On Vercel production builds, `scripts/vercel-build.mjs` applies pending forward migrations and verifies the hosted schema before compiling Next.js. Its synthetic verification records and policy update are rolled back together. Preview builds do not run production migrations. A migration or verification failure stops the deployment. `vercel.json` and `next.config.ts` use the standard `.next` build directory on Vercel.
 
 Run `npm test`, `npm run typecheck` and `npm run build` before release. After deployment, check `/api/session` reports `authMode: "supabase"`, `configured: true`, `demo: false` and an empty identity list for a signed-out visitor. Verify invalid credentials are rejected, then complete an actual confirmed-account sign-in, synthetic upload and owner-only preview. A passing local build or mocked Auth test does not establish live email delivery or successful production sign-in.
 

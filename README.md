@@ -70,7 +70,7 @@ Webpack is used explicitly because Turbopack's Windows worker failed in this env
 
 ## Vercel build configuration
 
-`vercel.json` selects the Next.js framework, `npm run build`, and `.next` output. `next.config.ts` uses `.next` when Vercel sets `VERCEL=1`; the separate local production directories described above remain available for local presentations. Set the Vercel Root Directory to the repository root and use Node.js 24.x. Redeploy the latest commit after changing settings. Keep Vercel system environment variables enabled so `VERCEL` is available during builds and at runtime.
+`vercel.json` selects the Next.js framework, `scripts/vercel-build.mjs`, and `.next` output. Production deployments apply pending hosted migrations and verify the private database before building; preview deployments skip production database changes. `next.config.ts` uses `.next` when Vercel sets `VERCEL=1`; the separate local production directories described above remain available for local presentations. Set the Vercel Root Directory to the repository root and use Node.js 24.x. Redeploy the latest commit after changing settings. Keep Vercel system environment variables enabled so `VERCEL` and `VERCEL_ENV` are available during builds and at runtime.
 
 Vercel uses the Supabase database and Storage backends. Follow **[HOSTING.md](HOSTING.md)** to migrate the private PostgreSQL schema, create the private document bucket and configure server secrets before deployment. Vercel does not provide durable shared SQLite or local files ([official SQLite guidance](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel)); this application rejects those backends on Vercel. Do not point them at `/tmp` or seed demo identities during builds.
 

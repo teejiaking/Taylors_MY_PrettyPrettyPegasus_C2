@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { prepareHostedMigrations } from "./hosted-schema.mjs";
 
-const configured = process.env.SUPABASE_DATABASE_URL;
+const configured =
+  process.env.SUPABASE_MIGRATION_DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL;
 if (!configured)
   throw new Error(
     "Set the server-only SUPABASE_DATABASE_URL before migrating.",
