@@ -35,6 +35,8 @@ npm run db:migrate:hosted
 
 `supabase/migrations` contains the forward-only PostgreSQL migration source. The migration command stages identical files for Prisma and uses Prisma's migration history. Do not apply these same files separately through a second migration manager. The migration creates only the new `trustvault` schema; it does not replace `public`, `auth`, or existing local databases. It installs role, request, grant and governance constraints and the initial seven-day sharing policy, without demo accounts.
 
+If all seven initial tables already exist without Prisma history, the command first requires a read-only Prisma schema diff with no differences and a passing hosted integrity verification. Only then does it mark the initial migration as applied. Partial or differing schemas stop deployment for review; no existing tables are reset.
+
 The schema is private: anonymous and authenticated Data API roles have no schema/table/function grants, and RLS is enabled on all seven tables. The server database connection enforces the application's ownership, consent and role checks. Do not expose `trustvault` through the Data API or add permissive RLS policies to make browser requests work.
 
 ## Private encrypted Storage
