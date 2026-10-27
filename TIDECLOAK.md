@@ -6,7 +6,7 @@ The interface is now connected to server authentication. Real mode is the defaul
 
 Save your work. In administrator PowerShell run the VirtualMachinePlatform command shown by Docker, then restart Windows fully. Start Docker Desktop and wait for its Linux engine to be running. No app script changes Windows features or restarts Windows.
 
-Run npm run tidecloak:start from this repository. If you are setting up another checkout, run npm run tidecloak:prepare first. This prepares ignored local settings, generates random keys, and stores the Docker bootstrap password in .tidecloak/local.env. It does not overwrite existing .env.local values or delete Docker volumes.
+Run npm run tidecloak:start from this repository. If you are setting up another checkout, run npm run tidecloak:prepare first. This prepares ignored local settings, generates random keys, and stores the Docker bootstrap password in .tidecloak/local.env. It does not overwrite existing .env.local values or delete Docker volumes. A one-time initialization container gives TideCloak's non-root user ownership of the database directory before the server starts.
 
 Open http://localhost:8080. Use username admin and read the password locally from .tidecloak/local.env. Do not paste it into chat or Git. Complete TideCloak's realm setup wizard yourself, including its terms and Tide account enrollment. Choose trustvault as the realm/project name if available; otherwise use the actual realm name consistently below.
 
@@ -55,4 +55,4 @@ Follow DEPLOYMENT.md. Localhost is not reachable from Vercel or other visitors: 
 
 ## Verification boundaries
 
-npm run test:server exercises the installed TideCloak verifier and full server cookie/session routes with signed test fixtures. It is not a successful live enrollment or sign-in to your realm. Docker startup remains blocked until the Windows feature/restart requirement is resolved.
+npm run test:server exercises the installed TideCloak verifier and full server cookie/session routes with signed test fixtures. It is not a successful live enrollment or sign-in to your realm. A running Docker container and a reachable sign-in page confirm server startup only; complete realm enrollment and an application sign-in to verify the full integration.

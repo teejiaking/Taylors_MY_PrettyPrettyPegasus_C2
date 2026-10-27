@@ -1,7 +1,18 @@
 name: trustvault-identity
 services:
+  tidecloak-data-init:
+    image: tideorg/tidecloak-dev:latest
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown 1000:0 /opt/keycloak/data/h2 && chmod u+rwx /opt/keycloak/data/h2"]
+    volumes:
+      - identity-data:/opt/keycloak/data/h2
+    restart: "no"
   tidecloak:
     image: tideorg/tidecloak-dev:latest
+    depends_on:
+      tidecloak-data-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8080:8080"
     environment:
