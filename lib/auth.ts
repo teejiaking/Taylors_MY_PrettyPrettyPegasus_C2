@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
-import { db } from "./db";
+import { getDb } from "./db";
 import { AppError } from "./storage";
 import type { User } from "@prisma/client";
 export const sessionCookie = "tv_session";
@@ -17,7 +17,9 @@ export function tidecloakLoginConfigured() {
       typeof config.realm !== "string" ||
       !config.realm ||
       typeof config["auth-server-url"] !== "string" ||
-      config.resource !== client
+      config.resource !== client ||
+      !Array.isArray(config.jwk?.keys) ||
+      !config.jwk.keys.length
     )
       return false;
     const server = config["auth-server-url"].replace(/\/$/, "");
@@ -25,7 +27,9 @@ export function tidecloakLoginConfigured() {
     return (
       issuer === `${server}/realms/${config.realm}` &&
       (parsed.protocol === "https:" ||
-        (process.env.NODE_ENV !== "production" && parsed.protocol === "http:"))
+        (process.env.NODE_ENV !== "production" &&
+          parsed.protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)))
     );
   } catch {
     return false;
@@ -48,7 +52,9 @@ function secret() {
 export async function makeDemoSession(userId: string) {
   if (!isDemo())
     throw new AppError(403, "Local demo authentication is disabled.");
-  const user = await db.user.findFirst({ where: { id: userId, demo: true } });
+  const user = await getDb().user.findFirst({
+    where: { id: userId, demo: true },
+  });
   if (!user) throw new AppError(401, "Unknown demo identity.");
   return new SignJWT({ mode: "demo" })
     .setProtectedHeader({ alg: "HS256" })
@@ -101,7 +107,9 @@ export async function verifyTideToken(token: string) {
     ...(claims.realm_access?.roles ?? []),
     ...(claims.resource_access?.[client]?.roles ?? []),
   ];
-  const user = await db.user.findUnique({ where: { subject: claims.sub } });
+  const user = await getDb().user.findUnique({
+    where: { subject: claims.sub },
+  });
   if (!user || user.demo || !roles.includes(user.role.toLowerCase()))
     throw new AppError(
       403,
@@ -120,7 +128,7 @@ export async function authenticate(req: Request): Promise<User> {
         audience: "trustvault",
       });
       if (payload.mode !== "demo") throw new Error();
-      const user = await db.user.findFirst({
+      const user = await getDb().user.findFirst({
         where: { id: payload.sub, demo: true },
       });
       if (user) return user;

@@ -1,29 +1,58 @@
-# Optional TideCloak integration
+# TideCloak setup without Supabase
 
-The deployed website is the browser demo described in README.md. Its identity selector is a simulation and does not authenticate against TideCloak. No TideCloak settings are needed to deploy that demo.
+The interface is now connected to server authentication. Real mode is the default. Missing credentials show a setup message and never silently select a demo identity.
 
-The repository preserves the original server-side TideCloak integration:
+## 1. Enable Docker on Windows
 
-- lib/auth.ts verifies tokens through the installed @tidecloak/nextjs SDK and checks issuer, client, expiry, provisioned user mapping and matching realm role.
-- app/auth/[action]/route.ts provides authorization-code sign-in with signed state and PKCE, a callback, and an HttpOnly cookie.
-- app/api/[...path]/route.ts and lib/service.ts retain local authenticated document, consent, recipient and governance operations.
-- SQLite migrations, private AES-256-GCM file storage, subject provisioning, and 26 local security/integration checks remain available.
+Save your work. In administrator PowerShell run the VirtualMachinePlatform command shown by Docker, then restart Windows fully. Start Docker Desktop and wait for its Linux engine to be running. No app script changes Windows features or restarts Windows.
 
-## Local configuration
+Run npm run tidecloak:start from this repository. If you are setting up another checkout, run npm run tidecloak:prepare first. This prepares ignored local settings, generates random keys, and stores the Docker bootstrap password in .tidecloak/local.env. It does not overwrite existing .env.local values or delete Docker volumes.
 
-Use Node.js 24.x and persistent private disk. Run npm ci, then npm run setup:server to create an ignored .env with generated session and document keys. Existing .env files are preserved; review their auth mode and local paths before using this integration.
+Open http://localhost:8080. Use username admin and read the password locally from .tidecloak/local.env. Do not paste it into chat or Git. Complete TideCloak's realm setup wizard yourself, including its terms and Tide account enrollment. Choose trustvault as the realm/project name if available; otherwise use the actual realm name consistently below.
 
-Set AUTH_MODE=tidecloak and configure the server-only values from .env.example: APP_ORIGIN, TIDECLOAK_ISSUER, TIDECLOAK_CLIENT_ID, TIDECLOAK_CLIENT_SECRET and TIDECLOAK_CONFIG_JSON. Use the SDK adapter JSON downloaded for your actual realm client. Allow the exact APP_ORIGIN/auth/callback URL in that client. Keep all credentials out of Git and chat.
+Official instructions: https://docs.tide.org/Admin/Quick-deploy-test
 
-Use a separate local SQLite DATABASE_URL and STORAGE_DIR. Run npm run db:migrate for that database. Provision each immutable realm subject with a matching role:
+## 2. Register the app
 
-```sh
+In your realm's tide-console, register an OIDC client named trustvault. Enable the standard authorization-code flow, confidential client authentication and PKCE S256 for the server adapter used here. Set the exact local callback to http://127.0.0.1:3000/auth/callback and the local web origin to http://127.0.0.1:3000. For production add the exact HTTPS app origin and its /auth/callback URL; do not use a wildcard production redirect.
+
+Create or grant the application roles student, recipient and administrator as appropriate, completing any TideCloak governance approvals required by your realm. Download the Tide adapter JSON, including its JWK configuration, for this client.
+
+Edit the ignored .env.local:
+
+- WORKSPACE_MODE=tidecloak and AUTH_MODE=tidecloak.
+- APP_ORIGIN=http://127.0.0.1:3000 for development.
+- TIDECLOAK_ISSUER=http://localhost:8080/realms/trustvault, adjusted to your actual realm.
+- TIDECLOAK_CLIENT_ID=trustvault.
+- TIDECLOAK_CLIENT_SECRET: the confidential client's secret, kept server-only.
+- TIDECLOAK_CONFIG_JSON: the downloaded adapter JSON, on one line enclosed in single quotes. Its realm, resource and auth-server-url must match the issuer and client.
+
+Keep the generated SESSION_SECRET and DOCUMENT_ENCRYPTION_KEY. The latter must remain unchanged to read previously encrypted documents.
+
+## 3. Map real accounts and run
+
+The local SQLite schema has been initialized in a separate trustvault-tidecloak.db file. On a new checkout run npm run db:migrate. No demo identities are seeded into this database.
+
+Obtain each user's immutable subject/ID from your realm, then provision the matching application role:
+
+```powershell
 npm run auth:provision -- REAL-SUBJECT student@example.test "Student Name" STUDENT
-npm run auth:provision -- RECIPIENT-SUBJECT recipient@example.test "Recipient Name" RECIPIENT "Organisation Name"
+npm run auth:provision -- RECIPIENT-SUBJECT recipient@example.test "Recipient Name" RECIPIENT "Organisation"
+npm run auth:provision -- ADMIN-SUBJECT admin@example.test "Administrator Name" ADMINISTRATOR
+npm run auth:doctor -- --connect
+npm run dev
 ```
 
-The local /auth/login endpoint starts TideCloak sign-in; /api/session reports the verified server session. The main website remains the browser demo and does not consume that session. Connecting the full UI to real accounts is a separate change. Real hosted sign-in and document workflows would also require persistent application storage and a reachable TideCloak server; SQLite/private local files are deliberately unavailable on Vercel.
+Open http://127.0.0.1:3000 and choose Sign in with TideCloak. You enter your password on TideCloak. Returning to the app creates an HttpOnly app cookie only after verifying the token and subject/role mapping. Each API request rechecks the signed token and authorization. The UI does not use the browser simulation in this mode.
 
-## Verify
+Unknown/unprovisioned identities fail closed; roles are never accepted from a submitted form. Expired sessions require another sign-in. Sign out clears TrustVault's cookies and private views; it does not terminate the upstream TideCloak SSO session.
 
-Run npm run test:server. Tests use a separate test database and synthetic storage, exercise the installed token verifier with locally generated signed-token fixtures, and check authorization, PKCE/state, encryption, consent and independent governance. They do not claim a live sign-in to a configured external realm.
+Local HTTP is allowed for development loopback only. A production build requires HTTPS for both the app and TideCloak. Use npm run dev for the local HTTP server.
+
+## 4. Vercel
+
+Follow DEPLOYMENT.md. Localhost is not reachable from Vercel or other visitors: deploy TideCloak separately with persistent storage and an HTTPS domain before enabling real hosted sign-in. Complete the same realm/client mapping and configure Vercel's server environment. No Supabase service or SDK is required.
+
+## Verification boundaries
+
+npm run test:server exercises the installed TideCloak verifier and full server cookie/session routes with signed test fixtures. It is not a successful live enrollment or sign-in to your realm. Docker startup remains blocked until the Windows feature/restart requirement is resolved.

@@ -2,7 +2,7 @@ import { samplePdf, syntheticSamples } from "../lib/samples";
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
-import { db, databaseBackend } from "../lib/db";
+import { getDb, databaseBackend } from "../lib/db";
 import { storeFile, removeFile } from "../lib/storage";
 import { proposalHash } from "../lib/service";
 export async function seed() {
@@ -13,18 +13,18 @@ export async function seed() {
     process.env.VERCEL === "1"
   )
     throw new Error("Synthetic seeding is restricted to local demo mode.");
-  const old = await db.document.findMany({ select: { storageId: true } });
-  await db.$transaction([
-    db.accessEvent.deleteMany(),
-    db.shareGrant.deleteMany(),
-    db.shareRequest.deleteMany(),
-    db.document.deleteMany(),
-    db.adminChangeRequest.deleteMany(),
-    db.user.deleteMany(),
-    db.policy.deleteMany(),
+  const old = await getDb().document.findMany({ select: { storageId: true } });
+  await getDb().$transaction([
+    getDb().accessEvent.deleteMany(),
+    getDb().shareGrant.deleteMany(),
+    getDb().shareRequest.deleteMany(),
+    getDb().document.deleteMany(),
+    getDb().adminChangeRequest.deleteMany(),
+    getDb().user.deleteMany(),
+    getDb().policy.deleteMany(),
   ]);
   for (const d of old) await removeFile(d.storageId).catch(() => {});
-  await db.user.createMany({
+  await getDb().user.createMany({
     data: [
       {
         id: "student-maya",
@@ -61,7 +61,7 @@ export async function seed() {
       },
     ],
   });
-  await db.policy.create({
+  await getDb().policy.create({
     data: { id: "sharing", maxDurationHours: 168, version: 1 },
   });
   const samples = syntheticSamples;
@@ -71,7 +71,7 @@ export async function seed() {
         Object.entries(sample.attributes).map(([k, v]) => `${k}: ${v}`),
       ),
       storageId = await storeFile(bytes, "application/pdf");
-    await db.document.create({
+    await getDb().document.create({
       data: {
         ...sample,
         ownerId: "student-maya",
@@ -97,7 +97,7 @@ export async function seed() {
     recipientId: "recipient-campus",
     documentKind: "enrolment",
   };
-  await db.shareRequest.createMany({
+  await getDb().shareRequest.createMany({
     data: [
       {
         ...common,
@@ -133,7 +133,7 @@ export async function seed() {
     ],
   });
   for (const state of ["active", "expired", "revoked"])
-    await db.shareGrant.create({
+    await getDb().shareGrant.create({
       data: {
         id: `grant-${state}`,
         requestId: `request-${state}`,
@@ -159,10 +159,10 @@ export async function seed() {
     reason:
       "Allow up to 14 days for simulated accommodation application reviews.",
   };
-  await db.adminChangeRequest.create({
+  await getDb().adminChangeRequest.create({
     data: { id: "proposal-duration", ...p, proposalHash: proposalHash(p) },
   });
-  await db.accessEvent.createMany({
+  await getDb().accessEvent.createMany({
     data: [
       {
         actorId: "student-maya",
@@ -199,7 +199,7 @@ export async function seed() {
   console.log(
     "Demo reset: 4 identities, 3 encrypted PDFs, 2 pending requests, active/expired/revoked grants, and pending policy proposal.",
   );
-  await db.$disconnect();
+  await getDb().$disconnect();
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   await seed();

@@ -1810,3 +1810,41 @@ main#main-content {
     visibility: visible;
   }
 }
+
+.auth-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: var(--bg);
+}
+.auth-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 36px;
+}
+.auth-card .brand {
+  margin-bottom: 36px;
+}
+.auth-card h1 {
+  font-size: 30px;
+  line-height: 1.2;
+  margin: 12px 0 18px;
+}
+.auth-card > p {
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 18px 0;
+}
+.auth-card .notice {
+  margin: 20px 0;
+}
+.auth-card .full-width {
+  margin-top: 22px;
+}
+.auth-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}

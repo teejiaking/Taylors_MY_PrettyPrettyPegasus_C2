@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import type { User, Prisma } from "@prisma/client";
 import { z } from "zod";
-import { db } from "./db";
+import { getDb } from "./db";
 import { requireRole } from "./auth";
-import { AppError, readFilePrivate, storeFile, removeFile } from "./storage";
+import {
+  AppError,
+  MAX_FILE_SIZE,
+  readFilePrivate,
+  storeFile,
+  removeFile,
+} from "./storage";
 import { assess, fieldNames } from "./guardian";
 import { samplePdf, syntheticSamples } from "./samples";
 const fieldsSchema = z
@@ -17,7 +23,7 @@ const fieldsSchema = z
 export async function addSamples(user: User) {
   requireRole(user, "STUDENT");
   if (
-    await db.document.count({
+    await getDb().document.count({
       where: {
         ownerId: user.id,
         attributeSource: { startsWith: "Seeded synthetic" },
@@ -47,7 +53,7 @@ export async function addSamples(user: User) {
           "Seeded synthetic attributes - fictional Maya Chen; not extracted from an uploaded file",
       });
     }
-    await db.$transaction(async (tx) => {
+    await getDb().$transaction(async (tx) => {
       if (
         await tx.document.count({
           where: {
@@ -83,7 +89,7 @@ export async function event(
   targetId: string | null,
   detail: string,
 ) {
-  return db.accessEvent.create({
+  return getDb().accessEvent.create({
     data: { actorId, ownerId, action, outcome, targetId, detail },
   });
 }
@@ -96,10 +102,10 @@ export function grantState(g: { revokedAt: Date | null; expiresAt: Date }) {
 }
 const userSelect = { id: true, name: true, email: true, organisation: true };
 export async function overview(user: User) {
-  const policy = await db.policy.findUniqueOrThrow({
+  const policy = await getDb().policy.findUniqueOrThrow({
     where: { id: "sharing" },
   });
-  const activity = await db.accessEvent.findMany({
+  const activity = await getDb().accessEvent.findMany({
     where:
       user.role === "STUDENT"
         ? { ownerId: user.id }
@@ -122,7 +128,7 @@ export async function overview(user: User) {
   };
   if (user.role === "STUDENT") {
     const [documents, requests, grants] = await Promise.all([
-      db.document.findMany({
+      getDb().document.findMany({
         where: { ownerId: user.id },
         select: {
           id: true,
@@ -136,12 +142,12 @@ export async function overview(user: User) {
         },
         orderBy: { createdAt: "desc" },
       }),
-      db.shareRequest.findMany({
+      getDb().shareRequest.findMany({
         where: { studentId: user.id },
         include: { recipient: { select: userSelect } },
         orderBy: { createdAt: "desc" },
       }),
-      db.shareGrant.findMany({
+      getDb().shareGrant.findMany({
         where: { ownerId: user.id },
         include: {
           recipient: { select: userSelect },
@@ -163,11 +169,11 @@ export async function overview(user: User) {
   }
   if (user.role === "RECIPIENT") {
     const [requests, grants, students] = await Promise.all([
-      db.shareRequest.findMany({
+      getDb().shareRequest.findMany({
         where: { recipientId: user.id },
         orderBy: { createdAt: "desc" },
       }),
-      db.shareGrant.findMany({
+      getDb().shareGrant.findMany({
         where: { recipientId: user.id },
         select: {
           id: true,
@@ -181,7 +187,7 @@ export async function overview(user: User) {
         },
         orderBy: { consentAt: "desc" },
       }),
-      db.user.findMany({
+      getDb().user.findMany({
         where: { role: "STUDENT", demo: user.demo },
         select: { id: true, name: true },
       }),
@@ -194,7 +200,7 @@ export async function overview(user: User) {
     };
   }
   requireRole(user, "ADMINISTRATOR");
-  const proposals = await db.adminChangeRequest.findMany({
+  const proposals = await getDb().adminChangeRequest.findMany({
     include: {
       proposer: { select: userSelect },
       reviewer: { select: userSelect },
@@ -210,8 +216,11 @@ export async function upload(
   kind: string,
 ) {
   requireRole(user, "STUDENT");
-  if (file.size > 5 * 1024 * 1024)
-    throw new AppError(400, "Maximum file size is 5 MB.");
+  if (file.size > MAX_FILE_SIZE)
+    throw new AppError(
+      400,
+      `Maximum file size is ${MAX_FILE_SIZE / (1024 * 1024)} MB.`,
+    );
   const parsed = z
     .object({
       title: z.string().trim().min(2).max(100),
@@ -221,7 +230,7 @@ export async function upload(
   const bytes = Buffer.from(await file.arrayBuffer()),
     storageId = await storeFile(bytes, file.type);
   try {
-    return await db.$transaction(async (tx) => {
+    return await getDb().$transaction(async (tx) => {
       const doc = await tx.document.create({
         data: {
           ownerId: user.id,
@@ -251,7 +260,7 @@ export async function upload(
   }
 }
 export async function preview(user: User, id: string) {
-  const doc = await db.document.findUnique({ where: { id } });
+  const doc = await getDb().document.findUnique({ where: { id } });
   if (user.role !== "STUDENT" || !doc || doc.ownerId !== user.id) {
     await event(
       user.id,
@@ -287,11 +296,11 @@ export async function createRequest(user: User, input: unknown) {
       durationHours: z.number().int().min(1).max(720),
     })
     .parse(input);
-  const student = await db.user.findFirst({
+  const student = await getDb().user.findFirst({
     where: { id: data.studentId, role: "STUDENT", demo: user.demo },
   });
   if (!student) throw new AppError(404, "Student not found.");
-  return db.$transaction(async (tx) => {
+  return getDb().$transaction(async (tx) => {
     const request = await tx.shareRequest.create({
       data: { ...data, recipientId: user.id },
     });
@@ -317,7 +326,7 @@ export async function decideRequest(user: User, id: string, input: unknown) {
       durationHours: z.number().int().min(1).max(720).optional(),
     })
     .parse(input);
-  return db.$transaction(async (tx) => {
+  return getDb().$transaction(async (tx) => {
     const request = await tx.shareRequest.findUnique({ where: { id } });
     if (!request || request.studentId !== user.id)
       throw new AppError(404, "Request unavailable.");
@@ -411,7 +420,7 @@ export async function decideRequest(user: User, id: string, input: unknown) {
 }
 export async function revoke(user: User, id: string) {
   requireRole(user, "STUDENT");
-  return db.$transaction(async (tx) => {
+  return getDb().$transaction(async (tx) => {
     const grant = await tx.shareGrant.findUnique({ where: { id } });
     if (!grant || grant.ownerId !== user.id)
       throw new AppError(404, "Grant unavailable.");
@@ -435,7 +444,7 @@ export async function revoke(user: User, id: string) {
 }
 export async function accessGrant(user: User, id: string) {
   // Read, authorize, project and audit in one SQLite transaction. No sensitive values in the audit.
-  const result = await db.$transaction(async (tx) => {
+  const result = await getDb().$transaction(async (tx) => {
     const grant = await tx.shareGrant.findUnique({
         where: { id },
         include: { document: true, request: true },
@@ -523,7 +532,7 @@ export async function proposePolicy(user: User, input: unknown) {
       reason: z.string().trim().min(10).max(500),
     })
     .parse(input);
-  return db.$transaction(async (tx) => {
+  return getDb().$transaction(async (tx) => {
     const policy = await tx.policy.findUniqueOrThrow({
       where: { id: "sharing" },
     });
@@ -556,7 +565,7 @@ export async function reviewPolicy(user: User, id: string, input: unknown) {
   const { decision } = z
     .object({ decision: z.enum(["APPROVE", "REJECT"]) })
     .parse(input);
-  return db.$transaction(async (tx) => {
+  return getDb().$transaction(async (tx) => {
     const p = await tx.adminChangeRequest.findUnique({ where: { id } });
     if (!p) throw new AppError(404, "Proposal unavailable.");
     if (p.proposerId === user.id)

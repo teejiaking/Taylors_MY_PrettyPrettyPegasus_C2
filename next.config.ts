@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
-  serverExternalPackages: ["@prisma/client", "@tidecloak/nextjs"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "@prisma/trustvault-postgres",
+    "@tidecloak/nextjs",
+  ],
   async headers() {
     return [
       {

@@ -3,7 +3,7 @@ import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { db } from "../lib/db";
+import { getDb } from "../lib/db";
 import { seed } from "../scripts/seed";
 import * as s from "../lib/service";
 import { assess } from "../lib/guardian";
@@ -25,7 +25,7 @@ import {
 } from "../lib/storage";
 import type { User } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { GET as apiGet } from "../app/api/[...path]/route";
+import { GET as apiGet, POST as apiPost } from "../app/api/[...path]/route";
 import { GET as authGet } from "../app/auth/[action]/route";
 let student: User,
   recipient: User,
@@ -35,13 +35,17 @@ let student: User,
   otherRecipient: User;
 before(async () => {
   await seed();
-  student = await db.user.findUniqueOrThrow({ where: { id: "student-maya" } });
-  recipient = await db.user.findUniqueOrThrow({
+  student = await getDb().user.findUniqueOrThrow({
+    where: { id: "student-maya" },
+  });
+  recipient = await getDb().user.findUniqueOrThrow({
     where: { id: "recipient-campus" },
   });
-  adminA = await db.user.findUniqueOrThrow({ where: { id: "admin-jordan" } });
-  adminB = await db.user.findUniqueOrThrow({ where: { id: "admin-sam" } });
-  otherStudent = await db.user.create({
+  adminA = await getDb().user.findUniqueOrThrow({
+    where: { id: "admin-jordan" },
+  });
+  adminB = await getDb().user.findUniqueOrThrow({ where: { id: "admin-sam" } });
+  otherStudent = await getDb().user.create({
     data: {
       id: "test-other-student",
       subject: "demo:other",
@@ -51,7 +55,7 @@ before(async () => {
       demo: true,
     },
   });
-  otherRecipient = await db.user.create({
+  otherRecipient = await getDb().user.create({
     data: {
       id: "test-other-recipient",
       subject: "demo:otherrecipient",
@@ -63,7 +67,7 @@ before(async () => {
     },
   });
 });
-after(async () => db.$disconnect());
+after(async () => getDb().$disconnect());
 const denied = (fn: () => Promise<unknown>, status: number) =>
   assert.rejects(
     fn,
@@ -176,7 +180,7 @@ test("another student, a recipient and an administrator cannot retrieve an origi
   assert.equal(p.bytes.subarray(0, 5).toString(), "%PDF-");
 });
 test("stored file is ciphertext and authenticated encryption detects tampering", async () => {
-  const d = await db.document.findUniqueOrThrow({
+  const d = await getDb().document.findUniqueOrThrow({
     where: { id: "doc-passport" },
   });
   const file = path.resolve(process.env.STORAGE_DIR!, d.storageId),
@@ -214,7 +218,9 @@ test("student uploads are encrypted and explicitly have no extracted attributes"
     "Uploaded demo certificate",
     "enrolment",
   );
-  const stored = await db.document.findUniqueOrThrow({ where: { id: d.id } });
+  const stored = await getDb().document.findUniqueOrThrow({
+    where: { id: d.id },
+  });
   assert.deepEqual(stored.attributes, {});
   assert.match(stored.attributeSource, /not extracted or verified/);
   await denied(
@@ -231,7 +237,7 @@ test("student uploads are encrypted and explicitly have no extracted attributes"
 test("an unrelated recipient cannot use a grant; denied access is audited", async () => {
   await denied(() => s.accessGrant(otherRecipient, "grant-active"), 403);
   assert.equal(
-    await db.accessEvent.count({
+    await getDb().accessEvent.count({
       where: {
         actorId: otherRecipient.id,
         action: "GRANT_ACCESS",
@@ -259,7 +265,7 @@ test("recipient server responses contain exactly approved attributes and no docu
   ])
     assert.equal(raw.includes(forbidden), false, forbidden);
   assert.equal(
-    await db.accessEvent.count({
+    await getDb().accessEvent.count({
       where: {
         targetId: "grant-active",
         action: "GRANT_ACCESS",
@@ -296,7 +302,9 @@ test("Guardian flags all three excessive accommodation fields and suggests only 
 });
 test("nothing is granted before consent; student cannot approve another student request", async () => {
   assert.equal(
-    await db.shareGrant.count({ where: { requestId: "request-excessive" } }),
+    await getDb().shareGrant.count({
+      where: { requestId: "request-excessive" },
+    }),
     0,
   );
   await denied(
@@ -333,7 +341,7 @@ test("selected consent omits sensitive fields, disallows additional fields and o
     fields: ["enrolmentStatus"],
     durationHours: 12,
   });
-  const grant = await db.shareGrant.findFirstOrThrow({
+  const grant = await getDb().shareGrant.findFirstOrThrow({
     where: { requestId: "request-excessive" },
   });
   assert.deepEqual((await s.accessGrant(recipient, grant.id))!.attributes, {
@@ -346,7 +354,9 @@ test("selected consent omits sensitive fields, disallows additional fields and o
 test("rejecting a request creates no grant, and a decided request cannot be replayed", async () => {
   await s.decideRequest(student, "request-reasonable", { decision: "REJECT" });
   assert.equal(
-    await db.shareGrant.count({ where: { requestId: "request-reasonable" } }),
+    await getDb().shareGrant.count({
+      where: { requestId: "request-reasonable" },
+    }),
     0,
   );
   await denied(
@@ -369,7 +379,7 @@ test("recipient requests use the authenticated organisation and identity", async
     recipientId: otherRecipient.id,
     organisation: "Spoofed",
   });
-  const r = await db.shareRequest.findUniqueOrThrow({
+  const r = await getDb().shareRequest.findUniqueOrThrow({
     where: { id: created.id },
   });
   assert.equal(r.recipientId, recipient.id);
@@ -387,7 +397,9 @@ test("recipient requests use the authenticated organisation and identity", async
   );
 });
 test("pending policy is unchanged and proposer cannot approve own proposal", async () => {
-  const p = await db.policy.findUniqueOrThrow({ where: { id: "sharing" } });
+  const p = await getDb().policy.findUniqueOrThrow({
+    where: { id: "sharing" },
+  });
   assert.equal(p.maxDurationHours, 168);
   assert.equal(p.version, 1);
   await denied(
@@ -395,7 +407,7 @@ test("pending policy is unchanged and proposer cannot approve own proposal", asy
     403,
   );
   assert.equal(
-    (await db.policy.findUniqueOrThrow({ where: { id: "sharing" } }))
+    (await getDb().policy.findUniqueOrThrow({ where: { id: "sharing" } }))
       .maxDurationHours,
     168,
   );
@@ -406,7 +418,9 @@ test("pending policy is unchanged and proposer cannot approve own proposal", asy
 });
 test("second administrator applies the immutable proposal exactly once", async () => {
   await s.reviewPolicy(adminB, "proposal-duration", { decision: "APPROVE" });
-  const p = await db.policy.findUniqueOrThrow({ where: { id: "sharing" } });
+  const p = await getDb().policy.findUniqueOrThrow({
+    where: { id: "sharing" },
+  });
   assert.equal(p.maxDurationHours, 336);
   assert.equal(p.version, 2);
   await denied(
@@ -414,11 +428,12 @@ test("second administrator applies the immutable proposal exactly once", async (
     409,
   );
   assert.equal(
-    (await db.policy.findUniqueOrThrow({ where: { id: "sharing" } })).version,
+    (await getDb().policy.findUniqueOrThrow({ where: { id: "sharing" } }))
+      .version,
     2,
   );
   assert.equal(
-    await db.accessEvent.count({
+    await getDb().accessEvent.count({
       where: { action: "POLICY_APPLIED", targetId: "proposal-duration" },
     }),
     1,
@@ -437,7 +452,7 @@ test("subsequent grants use approved policy and current policy is rechecked at a
     fields: ["enrolmentStatus"],
     durationHours: 300,
   });
-  const g = await db.shareGrant.findFirstOrThrow({
+  const g = await getDb().shareGrant.findFirstOrThrow({
     where: { requestId: r.id },
   });
   assert.equal(g.policyVersion, 2);
@@ -450,7 +465,7 @@ test("subsequent grants use approved policy and current policy is rechecked at a
   await denied(() => s.accessGrant(recipient, g.id), 403);
 });
 test("rejected proposals leave policy unchanged and cannot be approved later", async () => {
-  const before = await db.policy.findUniqueOrThrow({
+  const before = await getDb().policy.findUniqueOrThrow({
     where: { id: "sharing" },
   });
   const p = await s.proposePolicy(adminA, {
@@ -459,7 +474,7 @@ test("rejected proposals leave policy unchanged and cannot be approved later", a
   });
   await s.reviewPolicy(adminB, p.id, { decision: "REJECT" });
   assert.deepEqual(
-    await db.policy.findUniqueOrThrow({ where: { id: "sharing" } }),
+    await getDb().policy.findUniqueOrThrow({ where: { id: "sharing" } }),
     before,
   );
   await denied(
@@ -478,7 +493,7 @@ test("student overview has no other owners documents; administrators receive no 
 });
 test("proposal content cannot be edited after submission at the database boundary", async () => {
   await assert.rejects(() =>
-    db.adminChangeRequest.update({
+    getDb().adminChangeRequest.update({
       where: { id: "proposal-duration" },
       data: { proposedMaxHours: 600 },
     }),
@@ -509,7 +524,7 @@ test("installed TideCloak SDK verifies signed tokens and rejects invalid signatu
       jwk: { keys: [jwk] },
     }),
   });
-  await db.user.create({
+  await getDb().user.create({
     data: {
       subject: "real:test-subject",
       name: "Test Verified Student",
@@ -610,7 +625,7 @@ test("configured TideCloak login validates state and PKCE and sets a verified se
   const origin = "https://trustvault.example.test";
   const issuer = "https://callback-identity.example.test/realms/trustvault";
   const subject = "real:callback-test-subject";
-  await db.user.create({
+  await getDb().user.create({
     data: {
       subject,
       name: "Callback Student",
@@ -706,4 +721,102 @@ test("configured TideCloak login validates state and PKCE and sets a verified se
       }
     },
   );
+});
+
+test("verified TideCloak cookies drive the real session and overview; logout removes app cookies", async () => {
+  const { publicKey, privateKey } = await generateKeyPair("EdDSA");
+  const origin = "https://vault-session.example.test",
+    issuer = "https://identity-session.example.test/realms/trustvault";
+  const jwk = {
+    ...(await exportJWK(publicKey)),
+    kid: "session-test-key",
+    alg: "EdDSA",
+  };
+  const subject = "real:http-session-test";
+  await getDb().user.create({
+    data: {
+      subject,
+      name: "Session Student",
+      email: "session-student@example.test",
+      role: "STUDENT",
+      demo: false,
+    },
+  });
+  await withAuthEnv(
+    {
+      WORKSPACE_MODE: "tidecloak",
+      AUTH_MODE: "tidecloak",
+      APP_ORIGIN: origin,
+      TIDECLOAK_ISSUER: issuer,
+      TIDECLOAK_CLIENT_ID: "trustvault",
+      TIDECLOAK_CLIENT_SECRET: "fixture-secret",
+      TIDECLOAK_CONFIG_JSON: JSON.stringify({
+        "auth-server-url": "https://identity-session.example.test",
+        realm: "trustvault",
+        resource: "trustvault",
+        jwk: { keys: [jwk] },
+      }),
+    },
+    async () => {
+      const token = await new SignJWT({
+        sub: subject,
+        iss: issuer,
+        azp: "trustvault",
+        realm_access: { roles: ["student"] },
+      })
+        .setProtectedHeader({ alg: "EdDSA", kid: "session-test-key" })
+        .setExpirationTime("5m")
+        .sign(privateKey);
+      const request = (path: string, cookie = token) =>
+        new NextRequest(origin + "/api/" + path, {
+          headers: { cookie: "tv_tide=" + cookie },
+        });
+      const session = await apiGet(request("session"), {
+        params: Promise.resolve({ path: ["session"] }),
+      });
+      const data = await session.json();
+      assert.equal(data.user.name, "Session Student");
+      assert.equal(data.demo, false);
+      assert.equal(data.configured, true);
+      assert.deepEqual(data.identities, []);
+      assert.equal("token" in data, false);
+      assert.match(session.headers.get("cache-control")!, /no-store/);
+      const overview = await apiGet(request("overview"), {
+        params: Promise.resolve({ path: ["overview"] }),
+      });
+      assert.equal(overview.status, 200);
+      const vault = await overview.json();
+      assert.deepEqual(vault.documents, []);
+      assert.deepEqual(vault.grants, []);
+      const invalid = await apiGet(request("session", "forged"), {
+        params: Promise.resolve({ path: ["session"] }),
+      });
+      assert.equal((await invalid.json()).user, null);
+      assert.equal(invalid.cookies.get("tv_tide")?.value, "");
+      const logout = await apiPost(
+        new NextRequest(origin + "/api/logout", {
+          method: "POST",
+          headers: { origin, cookie: "tv_tide=" + token },
+        }),
+        { params: Promise.resolve({ path: ["logout"] }) },
+      );
+      assert.equal(logout.status, 200);
+      assert.equal(logout.cookies.get("tv_tide")?.value, "");
+    },
+  );
+});
+
+test("browser demo mode never exposes authenticated server operations", async () => {
+  await withAuthEnv({ WORKSPACE_MODE: "demo" }, async () => {
+    const response = await apiGet(
+      new NextRequest("https://vault.example.test/api/session"),
+      { params: Promise.resolve({ path: ["session"] }) },
+    );
+    assert.equal(response.status, 503);
+    const login = await authGet(
+      new NextRequest("https://vault.example.test/auth/login"),
+      { params: Promise.resolve({ action: "login" }) },
+    );
+    assert.equal(login.headers.get("location"), "https://vault.example.test/");
+  });
 });

@@ -1,6 +1,6 @@
 # TrustVault: two-minute demonstration
 
-Run npm ci and npm run dev, or open the Vercel deployment. No account or external service is required. The app opens as Maya. Use Reset demo before presenting; all data is synthetic and held in this tab's memory.
+For the synthetic walkthrough, explicitly set WORKSPACE_MODE=demo and run npm ci and npm run dev, or use a deployment configured in that mode. No account is needed for this mode. The app opens as Maya. Real TideCloak mode uses actual accounts and the server workflows instead; see TIDECLOAK.md. Use Reset demo before presenting; all data is synthetic and held in this tab's memory.
 
 | Time | Action and narration |
 | --- | --- |

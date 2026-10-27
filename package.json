@@ -5,16 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --webpack --hostname 127.0.0.1",
-    "build": "next build --webpack",
+    "build": "node scripts/generate.mjs && next build --webpack",
     "start": "next start --hostname 127.0.0.1",
-    "test": "tsx --test tests/browser-workspace.test.ts",
+    "test": "tsx --test tests/browser-workspace.test.ts tests/workspace-client.test.ts tests/hosted-storage.test.ts",
     "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/generate.mjs",
     "db:generate": "node scripts/generate.mjs",
     "db:migrate": "tsx scripts/migrate.ts",
     "auth:provision": "tsx scripts/provision.ts",
     "setup:server": "tsx scripts/setup.ts",
-    "test:server": "tsx scripts/test.ts"
+    "test:server": "tsx scripts/test.ts",
+    "db:migrate:postgres": "node scripts/migrate-postgres.mjs",
+    "tidecloak:prepare": "node scripts/tidecloak.mjs prepare",
+    "tidecloak:start": "node scripts/tidecloak.mjs start",
+    "tidecloak:status": "node scripts/tidecloak.mjs status",
+    "tidecloak:stop": "node scripts/tidecloak.mjs stop",
+    "auth:doctor": "node scripts/auth-doctor.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -24,7 +30,8 @@
     "zod": "^4.1.0",
     "@prisma/client": "6.19.0",
     "@tidecloak/nextjs": "0.14.40",
-    "jose": "^6.1.0"
+    "jose": "^6.1.0",
+    "@next/env": "16.2.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",

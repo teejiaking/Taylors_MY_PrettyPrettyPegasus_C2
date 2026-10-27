@@ -1,6 +1,8 @@
-import "dotenv/config";
+import nextEnv from "@next/env";
+const { loadEnvConfig } = nextEnv;
+loadEnvConfig(process.cwd());
 import { z } from "zod";
-import { db } from "../lib/db";
+import { getDb } from "../lib/db";
 let [subject, email, name, role, organisation] = process.argv.slice(2);
 const data = z
   .object({
@@ -17,7 +19,7 @@ if (process.env.AUTH_MODE !== "tidecloak")
   );
 if (data.role === "RECIPIENT" && !data.organisation)
   throw new Error("Recipient organisation is required.");
-await db.user.upsert({
+await getDb().user.upsert({
   where: { subject: data.subject },
   create: { ...data, demo: false },
   update: { ...data, demo: false },
@@ -25,4 +27,4 @@ await db.user.upsert({
 console.log(
   "Provisioned subject mapping. Matching TideCloak role is also required.",
 );
-await db.$disconnect();
+await getDb().$disconnect();

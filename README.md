@@ -1,39 +1,44 @@
 # TrustVault
 
-A browser demo of student document custody, selective consent, revocable recipient access and two-person policy review.
+A Next.js app for student documents, selective consent, recipient access and two-person policy review. Real accounts use TideCloak. Supabase is not used.
 
-## Run locally
+## Start after the Windows restart
 
-Requires Node.js 24.x and npm. No accounts, credentials, databases or environment variables are needed.
+VirtualMachinePlatform must be enabled in administrator PowerShell and Windows must be restarted before Docker Desktop can run. The app does not change Windows features or restart your computer.
 
-```sh
+With Docker Desktop running:
+
+```powershell
 npm ci
-npm run dev
+npm run tidecloak:start
 ```
 
-Open http://127.0.0.1:3000. The app starts as Maya Chen with three fictional documents. Use the header selector to try Alex (recipient), Jordan (administrator/proposer), and Sam (independent reviewer). See [DEMO.md](DEMO.md) for the walkthrough and [summary.md](summary.md) for the project overview.
+Local settings and random keys have been prepared in ignored .env.local; Docker bootstrap credentials are in ignored .tidecloak/local.env. Preparation preserves existing values. See [TIDECLOAK.md](TIDECLOAK.md) to finish the realm/client setup and sign in.
 
-Upload and preview synthetic PDF/PNG/JPEG files up to 5 MB, create requests, review Guardian suggestions, grant selected attributes, view as the recipient, revoke access, and independently approve or reject policy changes. Uploaded files do not automatically provide attributes; the three labelled fictional samples demonstrate selective sharing.
+The interface now uses the real /auth/login, /api/session, document, request, grant, governance and logout endpoints. Private views clear after logout or an expired session. Identity switching and Reset demo appear only when WORKSPACE_MODE=demo is explicitly configured.
 
-## Deploy on Vercel
+## Storage and hosting
 
-Import this repository with the Next.js preset, repository root, Node.js 24.x, Install Command npm ci, Build Command npm run build, and Output Directory .next. No application environment variables are required. The compatibility script scripts/vercel-build.mjs is retained for existing dashboard build-command overrides and only runs Next.js.
+Local development uses a separate SQLite database and private encrypted disk. Vercel uses PostgreSQL (for example Neon) and a private Vercel Blob store. Uploaded originals are AES-256-GCM encrypted before storage, and only authenticated owner routes decrypt them. Recipients receive only approved attributes.
 
-Supabase and its hosted migrations are removed. TideCloak remains as an optional local server integration, disabled on Vercel; see [TIDECLOAK.md](TIDECLOAK.md). The deployed browser demo does not use server authentication or database storage. Existing remote data and ignored local files have not been changed.
+Follow [DEPLOYMENT.md](DEPLOYMENT.md) for Neon, private Blob and Vercel configuration. Build commands generate/compile code only; they never apply database migrations. A Vercel deployment requires a publicly reachable HTTPS TideCloak server. The local Docker instance is for development.
 
-## Data lifetime
+## Checks
 
-Files and actions stay in the current tab's memory. Reloading, closing the tab or Reset demo clears them and restores the starting examples. Visitors cannot synchronize or share records across tabs/devices. The identity selector simulates roles; it is not authentication. There is no server encryption, OCR or PDF redaction. Use synthetic data only.
-
-## Check and build
-
-```sh
+```powershell
 npm test
+npm run test:server
 npm run typecheck
 npm run build
-npm start
+npm run auth:doctor
 ```
 
-Run npm run test:server to check the retained local TideCloak, authorization and encrypted-storage integration against a separate test database. The optional Prisma client is generated on install without connecting to a database; the build never runs database migrations.
+Tests exercise real server authorization, token verification with signed fixtures, PKCE/state/cookies, encrypted storage, consent, expiry, revocation, independent approval, and client request handling. Cloud Blob requests are mocked. Live TideCloak enrollment and live Neon/Blob checks require your configured services and are not claimed by these tests.
 
-The workflow tests cover selected-field consent, replay rejection, recipient projection, expiry, revocation, upload validation and preview bytes, independent policy approval, reset and visitor isolation.
+## Optional browser demo
+
+Set WORKSPACE_MODE=demo in the server environment, then start or restart the app. This explicitly selected mode uses fictional identities and in-memory records that reset on reload. It cannot access authenticated server operations. It is not a fallback for failed real sign-in.
+
+Upload limits are 5 MB locally/in the demo and 4 MB for Vercel server uploads, leaving room for multipart overhead under Vercel's request limit. Uploads do not automatically extract attributes; labelled fictional samples demonstrate selective sharing. Guardian is rules-based advice. The sharing-duration policy uses application-level dual approval, not TideCloak's native IAM governance.
+
+Use synthetic documents only. See [DEMO.md](DEMO.md) and [summary.md](summary.md).

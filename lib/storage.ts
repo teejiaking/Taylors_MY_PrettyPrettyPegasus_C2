@@ -6,13 +6,33 @@ import {
 } from "node:crypto";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-export const MAX_FILE_SIZE = 5 * 1024 * 1024;
-export class AppError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
+import { AppError } from "./errors";
+export { AppError } from "./errors";
+import {
+  privateBlobConfigured,
+  putPrivateBlob,
+  getPrivateBlob,
+  deletePrivateBlob,
+} from "./private-blob";
+export const MAX_FILE_SIZE = (process.env.VERCEL === "1" ? 4 : 5) * 1024 * 1024;
+export function storageBackend(): "local" | "vercel-blob" {
+  const backend =
+    process.env.STORAGE_BACKEND ||
+    (process.env.VERCEL === "1" ? "vercel-blob" : "local");
+  if (backend !== "local" && backend !== "vercel-blob")
+    throw new Error("Unknown STORAGE_BACKEND.");
+  if (process.env.VERCEL === "1" && backend !== "vercel-blob")
+    throw new Error("Vercel requires persistent private Blob storage.");
+  return backend;
+}
+export function storageConfigured() {
+  try {
+    return (
+      /^[a-f0-9]{64}$/i.test(process.env.DOCUMENT_ENCRYPTION_KEY || "") &&
+      (storageBackend() === "local" || privateBlobConfigured())
+    );
+  } catch {
+    return false;
   }
 }
 function key() {
@@ -66,6 +86,10 @@ export async function storeFile(bytes: Buffer, mime: string) {
   cipher.setAAD(Buffer.from(id));
   const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
   const sealed = Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+  if (storageBackend() === "vercel-blob") {
+    await putPrivateBlob(id, sealed);
+    return id;
+  }
   const file = location(id);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, sealed, {
@@ -76,7 +100,10 @@ export async function storeFile(bytes: Buffer, mime: string) {
 }
 export async function readFilePrivate(id: string) {
   checkId(id);
-  const sealed = await readFile(location(id));
+  const sealed =
+    storageBackend() === "vercel-blob"
+      ? await getPrivateBlob(id)
+      : await readFile(location(id));
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key(),
@@ -91,5 +118,6 @@ export async function readFilePrivate(id: string) {
 }
 export async function removeFile(id: string) {
   checkId(id);
-  await unlink(location(id));
+  if (storageBackend() === "vercel-blob") await deletePrivateBlob(id);
+  else await unlink(location(id));
 }

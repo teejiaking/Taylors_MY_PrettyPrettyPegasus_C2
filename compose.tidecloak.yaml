@@ -1,0 +1,14 @@
+name: trustvault-identity
+services:
+  tidecloak:
+    image: tideorg/tidecloak-dev:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${TIDECLOAK_BOOTSTRAP_PASSWORD:?Run npm run tidecloak:prepare first}
+    volumes:
+      - identity-data:/opt/keycloak/data/h2
+    restart: unless-stopped
+volumes:
+  identity-data:

@@ -1,13 +1,13 @@
 # TrustVault
 
-A student document-sharing hackathon demo built with Next.js, React and TypeScript.
+TrustVault demonstrates student document custody, selective consent, revocable recipient access and application-level two-person policy approval.
 
-The website opens immediately without sign-in or external services. It includes a dashboard, three fictional sample documents, upload/preview, excessive-request guidance, selected-field consent, recipient viewing, expiry, revocation, governance proposals and an activity log. A header selector switches between Maya (student), Alex (recipient), Jordan and Sam (independent administrators).
+The app interface is connected to TideCloak sign-in, verified server sessions, authenticated vault operations and app logout. Passwords are entered on TideCloak; tokens remain in HttpOnly cookies. Unknown subjects and mismatched roles fail closed. The browser identity selector is available only in explicitly selected demo mode.
 
-The rules-based Guardian recommends the minimum attributes needed for a stated purpose. Consent is explicit and time limited. Recipient access projects approved attributes only and checks the current grant state and sharing policy. A policy proposal requires a different demo administrator's approval and can be applied only once.
+Vercel hosting uses PostgreSQL (for example Neon) for records and a private Vercel Blob store for AES-256-GCM encrypted original files. Local development can use SQLite and private disk. Supabase is not used. Builds do not apply database migrations.
 
-The default deployment runs entirely in the current browser tab. All records and files reset on reload, close or Reset demo. Visitors have separate workspaces. There is no real authentication, cross-device sharing, remote persistence, OCR, PDF redaction, or server encryption in this mode. Uploaded files do not supply extracted attributes; the labelled fictional samples demonstrate selective sharing.
+The rules-based Guardian flags potentially excessive requested attributes. Students approve selected fields and a bounded duration. Recipients receive approved attributes only; server access checks expiry, revocation and current policy. A different administrator must review a policy proposal before it changes the applied version.
 
-Supabase integration has been removed. Vercel builds run Next.js only and never connect to a database or perform migrations. The optional local TideCloak verifier, OIDC/PKCE routes, authorization services and encrypted SQLite/private-disk backend remain in the repository with their integration tests; they are disabled on Vercel.
+Uploads do not extract or verify document attributes; labelled fictional samples demonstrate selective sharing. Real mode persists account records and files. Explicit demo mode uses fictional in-memory identities and resets on reload. This app does not claim Tide-native end-to-end encryption or native Tide IAM governance for its application policy.
 
-See README.md for setup and Vercel deployment, TIDECLOAK.md for the optional integration, and DEMO.md for the two-minute walkthrough. Use synthetic data only.
+Code and fixture tests are available. Live TideCloak setup requires enabling Windows VirtualMachinePlatform, restarting and completing the realm/client enrollment. Hosted use additionally requires your Neon/private Blob credentials and a publicly reachable HTTPS TideCloak server. See README.md, TIDECLOAK.md, DEPLOYMENT.md and DEMO.md. Use synthetic documents only.

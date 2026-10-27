@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
   ShieldCheck,
   LayoutDashboard,
@@ -17,6 +17,7 @@ import {
   X,
   Clock3,
   ChevronRight,
+  LogOut,
   Building2,
   Fingerprint,
   UploadCloud,
@@ -30,6 +31,9 @@ import {
 } from "lucide-react";
 import { fieldLabels } from "@/lib/guardian";
 import { browserApi, browserPreview } from "@/lib/browser-workspace";
+import { serverApi, WorkspaceApiError } from "@/lib/workspace-client";
+import type { WorkspaceMode } from "@/lib/workspace-mode";
+import TideCloakSignIn from "./tidecloak-sign-in";
 type Identity = {
   id: string;
   name: string;
@@ -137,7 +141,6 @@ const roleName = (s: string) =>
       ? "Recipient"
       : "Student";
 const readable = (s: string) => s.toLowerCase().replaceAll("_", " ");
-const api = browserApi;
 function Badge({
   children,
   tone = "neutral",
@@ -159,9 +162,20 @@ function FileIcon({ kind = "enrolment" }: { kind?: string }) {
     </div>
   );
 }
-export default function TrustVault() {
+export default function TrustVault({
+  mode,
+  maxUploadMb = 5,
+}: {
+  mode: WorkspaceMode;
+  maxUploadMb?: number;
+}) {
+  const privateVersion = useRef(0);
+  const refreshVersion = useRef(0);
+  const isBrowserDemo = mode === "demo";
+  const api = isBrowserDemo ? browserApi : serverApi;
   const [session, setSession] = useState<{
-      user: Identity;
+      user: Identity | null;
+      configured?: boolean;
       identities: Identity[];
     } | null>(null),
     [data, setData] = useState<Data | null>(null),
@@ -183,20 +197,109 @@ export default function TrustVault() {
       purpose: string;
       source: string;
     } | null>(null);
+  function clearPrivateViews() {
+    privateVersion.current++;
+    refreshVersion.current++;
+    setData(null);
+    setReview(null);
+    setShare(null);
+    setModal(null);
+    setToast("");
+    setMobile(false);
+    setPage("dashboard");
+  }
+  function handleFailure(error: unknown) {
+    if (
+      !isBrowserDemo &&
+      error instanceof WorkspaceApiError &&
+      error.status === 401
+    ) {
+      clearPrivateViews();
+      setSession((previous) => (previous ? { ...previous, user: null } : null));
+      setError("Your session has expired. Sign in again to continue.");
+    } else
+      setError(
+        error instanceof Error
+          ? error.message
+          : "The request could not be completed.",
+      );
+  }
   async function refresh() {
+    const version = ++refreshVersion.current;
     const nextSession = await api<{
-      user: Identity;
+      user: Identity | null;
+      configured?: boolean;
       identities: Identity[];
     }>("session");
-    const nextData = await api<Data>("overview");
-    setSession(nextSession);
-    setData(nextData);
+    if (version !== refreshVersion.current) return;
+    if (!nextSession.user) {
+      clearPrivateViews();
+      setSession(nextSession);
+      return;
+    }
+    try {
+      const nextData = await api<Data>("overview");
+      if (version !== refreshVersion.current) return;
+      setSession(nextSession);
+      setData(nextData);
+    } catch (error) {
+      if (version !== refreshVersion.current) return;
+      handleFailure(error);
+      throw error;
+    }
   }
   useEffect(() => {
     refresh()
-      .catch((error) => setError(error.message))
+      .catch(handleFailure)
       .finally(() => setLoading(false));
-  }, []);
+    const query = new URLSearchParams(window.location.search);
+    if (!isBrowserDemo && query.has("authError")) {
+      setError(
+        query.get("authError") === "configuration"
+          ? "Sign-in is not configured yet. Contact the project operator."
+          : "Sign-in did not complete. Try again, or ask the project operator to check your account and role.",
+      );
+    }
+    if (query.has("authError") || query.has("signIn")) {
+      query.delete("authError");
+      query.delete("signIn");
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname +
+          (query.size ? "?" + query : "") +
+          window.location.hash,
+      );
+    }
+  }, [mode]);
+  useEffect(() => {
+    if (isBrowserDemo) return;
+    const recheck = () => {
+      if (document.visibilityState === "visible")
+        refresh().catch(handleFailure);
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+    };
+  }, [mode]);
+  async function signOut() {
+    privateVersion.current++;
+    refreshVersion.current++;
+    setBusy(true);
+    setError("");
+    try {
+      await api("logout", "POST");
+      clearPrivateViews();
+      await refresh();
+    } catch (error) {
+      handleFailure(error);
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 5000);
@@ -246,14 +349,17 @@ export default function TrustVault() {
       setToast(success);
       try {
         await refresh();
-      } catch {
-        setError(
-          "Your action completed, but the workspace could not refresh. Reload the page to see the latest state.",
-        );
+      } catch (error) {
+        if (error instanceof WorkspaceApiError && error.status === 401)
+          handleFailure(error);
+        else
+          setError(
+            "Your action completed, but the workspace could not refresh. Reload the page to see the latest state.",
+          );
       }
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      handleFailure(e);
       return false;
     } finally {
       setBusy(false);
@@ -332,6 +438,7 @@ export default function TrustVault() {
       setReview(null);
   }
   async function seeGrant(g: Grant) {
+    const version = privateVersion.current;
     setShare(null);
     setBusy(true);
     setError("");
@@ -342,9 +449,9 @@ export default function TrustVault() {
         purpose: string;
         source: string;
       }>(`grants/${g.id}/access`);
-      setShare(result);
+      if (version === privateVersion.current) setShare(result);
     } catch (e) {
-      setError((e as Error).message);
+      handleFailure(e);
     } finally {
       await refresh().catch(() => {});
       setBusy(false);
@@ -352,7 +459,9 @@ export default function TrustVault() {
   }
   function previewDocument(id: string) {
     try {
-      const url = browserPreview(id);
+      const url = isBrowserDemo
+        ? browserPreview(id)
+        : `/api/documents/${encodeURIComponent(id)}/preview`;
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (error) {
       setError(
@@ -377,11 +486,24 @@ export default function TrustVault() {
   async function formSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if (modal === "upload") {
+      const file = f.get("file");
+      if (
+        !(file instanceof File) ||
+        !file.size ||
+        file.size > maxUploadMb * 1024 * 1024
+      ) {
+        setError(`Choose a non-empty file up to ${maxUploadMb} MB.`);
+        return;
+      }
+    }
     let ok = false;
     if (modal === "upload")
       ok = await act(
         () => api("documents", "POST", f),
-        "Document added to this browser tab.",
+        isBrowserDemo
+          ? "Document added to this browser tab."
+          : "Document encrypted and added to your vault.",
       );
     if (modal === "request")
       ok = await act(
@@ -670,6 +792,20 @@ export default function TrustVault() {
         <p>Opening TrustVault…</p>
       </div>
     );
+  if (!isBrowserDemo && (!session?.user || !data))
+    return (
+      <TideCloakSignIn
+        configured={Boolean(session?.configured)}
+        error={error}
+        onRetry={() => {
+          setError("");
+          setLoading(true);
+          refresh()
+            .catch(handleFailure)
+            .finally(() => setLoading(false));
+        }}
+      />
+    );
   if (!session || !data)
     return (
       <main className="loading">
@@ -788,10 +924,19 @@ export default function TrustVault() {
             <div className="grow">
               <strong>{data.user.name}</strong>
               <small>
-                {roleName(data.user.role)} {"demo"}
+                {roleName(data.user.role)} {isBrowserDemo ? "demo" : "account"}
               </small>
             </div>
           </div>
+          {!isBrowserDemo && (
+            <button
+              className="button ghost full-width"
+              disabled={busy}
+              onClick={signOut}
+            >
+              <LogOut size={16} /> Sign out of TrustVault
+            </button>
+          )}
         </div>
       </aside>
       <div className="main-shell">
@@ -814,7 +959,7 @@ export default function TrustVault() {
             </span>
           </div>
           <div className="row top-actions">
-            {
+            {isBrowserDemo && (
               <button
                 className="button ghost small-button"
                 disabled={busy}
@@ -822,11 +967,11 @@ export default function TrustVault() {
               >
                 <RefreshCw size={15} /> Reset demo
               </button>
-            }
+            )}
             <span className="synthetic-label">
               <span /> Synthetic data only
             </span>
-            {
+            {isBrowserDemo && (
               <label className="identity-switch">
                 <span className="sr-only">Switch demo identity</span>
                 <select
@@ -842,7 +987,16 @@ export default function TrustVault() {
                   ))}
                 </select>
               </label>
-            }
+            )}
+            {!isBrowserDemo && (
+              <button
+                className="button ghost small-button"
+                disabled={busy}
+                onClick={signOut}
+              >
+                <LogOut size={15} /> Sign out
+              </button>
+            )}
             <span className="avatar top-avatar">
               {data.user.name
                 .split(" ")
@@ -854,12 +1008,12 @@ export default function TrustVault() {
         <div className="demo-bar">
           <span>
             <Fingerprint size={15} />
-            {"BROWSER DEMO"}
+            {isBrowserDemo ? "BROWSER DEMO" : "TIDECLOAK AUTHENTICATION"}
           </span>
           <p>
-            {
-              "No account needed. Files and actions stay in this tab and reset on reload."
-            }
+            {isBrowserDemo
+              ? "No account needed. Files and actions stay in this tab and reset on reload."
+              : "Signed in with TideCloak. Documents, consent and permissions are checked on the server."}
           </p>
           <LockKeyhole size={14} />
         </div>
@@ -928,7 +1082,9 @@ export default function TrustVault() {
                         label: "Private documents",
                         value: data.documents?.length ?? 0,
                         icon: FolderLock,
-                        note: "Available in this tab",
+                        note: isBrowserDemo
+                          ? "Available in this tab"
+                          : "Encrypted & owned by you",
                         color: "blue",
                       },
                       {
@@ -1078,7 +1234,9 @@ export default function TrustVault() {
                                     "Recipient organisation"}
                                 </h3>
                                 <p className="muted small">
-                                  {"Student accommodation · simulated"}
+                                  {isBrowserDemo
+                                    ? "Student accommodation · simulated"
+                                    : "Recipient request · synthetic documents"}
                                 </p>
                               </div>
                               <Badge
@@ -1148,7 +1306,9 @@ export default function TrustVault() {
                         ))}
                         <div className="vault-note">
                           <ShieldCheck size={15} />{" "}
-                          {"Files stay in this browser tab."}
+                          {isBrowserDemo
+                            ? "Files stay in this browser tab."
+                            : "Only you can open your original files."}
                         </div>
                       </div>
                     </section>
@@ -1164,9 +1324,9 @@ export default function TrustVault() {
                       {
                         "Try requesting and viewing selected sample information."
                       }
-                      {
-                        "Switch demo identities to try both sides of the consent flow."
-                      }
+                      {isBrowserDemo
+                        ? "Switch demo identities to try both sides of the consent flow."
+                        : "Every access verifies your account and the student’s current permission."}
                     </span>
                   </div>
                   <div className="section-heading">
@@ -1187,9 +1347,9 @@ export default function TrustVault() {
                     <span>
                       <strong>Application-level dual approval</strong>
                       <br />
-                      {
-                        "Switch between Jordan and Sam to try independent review. This is a simulation in your browser."
-                      }
+                      {isBrowserDemo
+                        ? "Switch between Jordan and Sam to try independent review. This is a simulation in your browser."
+                        : "A different administrator must review your proposal. Administrators cannot open student documents."}
                     </span>
                   </div>
                   {proposals()}
@@ -1296,7 +1456,7 @@ export default function TrustVault() {
                 >
                   <UploadCloud size={32} />
                   <strong>Add a document</strong>
-                  <span>PDF, PNG or JPEG · up to 5 MB</span>
+                  <span>PDF, PNG or JPEG · up to {maxUploadMb} MB</span>
                   <small>Synthetic documents only</small>
                 </button>
               </div>
@@ -1330,8 +1490,8 @@ export default function TrustVault() {
                 <span>
                   <strong>{data.user.organisation}</strong>
                   <br />
-                  {"Demo identity"}: {data.user.email}. Grant access is tied to
-                  this identity.
+                  {isBrowserDemo ? "Demo identity" : "Verified account"}:{" "}
+                  {data.user.email}. Grant access is tied to this identity.
                 </span>
               </div>
               <div className="section-heading">
@@ -1365,7 +1525,11 @@ export default function TrustVault() {
                     duration
                   </h2>
                 </div>
-                <Badge tone="teal">{"Demo sharing policy"}</Badge>
+                <Badge tone="teal">
+                  {isBrowserDemo
+                    ? "Demo sharing policy"
+                    : "Server-enforced sharing policy"}
+                </Badge>
               </div>
               <div className="notice info">
                 <Users size={20} />
@@ -1374,9 +1538,9 @@ export default function TrustVault() {
                   Proposals are immutable. A different administrator must
                   approve or reject. Pending and rejected proposals never change
                   policy.{" "}
-                  {
-                    "Demo role switching simulates this workflow; it is not real authentication."
-                  }
+                  {isBrowserDemo
+                    ? "Demo role switching simulates this workflow; it is not real authentication."
+                    : "Roles come from verified TideCloak identities. Each proposal needs an independent review."}
                 </span>
               </div>
               {proposals()}
@@ -1445,7 +1609,9 @@ export default function TrustVault() {
                 </h2>
                 <p className="muted">
                   {modal === "upload"
-                    ? "Use a synthetic PDF, PNG or JPEG. It stays in this tab until you reload or reset."
+                    ? isBrowserDemo
+                      ? "Use a synthetic PDF, PNG or JPEG. It stays in this tab until you reload or reset."
+                      : "Use a synthetic PDF, PNG or JPEG. The original is encrypted and stored privately."
                     : modal === "request"
                       ? "Give the student a clear reason for every attribute you request."
                       : "The current policy stays active until a different administrator approves."}
@@ -1474,7 +1640,7 @@ export default function TrustVault() {
                     <label className="file-input-label">
                       <UploadCloud size={28} />
                       <strong>Choose a synthetic file</strong>
-                      <span>PDF, PNG or JPEG · up to 5 MB</span>
+                      <span>PDF, PNG or JPEG · up to {maxUploadMb} MB</span>
                       <input
                         type="file"
                         name="file"
@@ -1495,7 +1661,7 @@ export default function TrustVault() {
                         {data.students?.map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.name}
-                            {" · synthetic identity"}
+                            {isBrowserDemo ? " · synthetic identity" : ""}
                           </option>
                         ))}
                       </select>
@@ -1579,7 +1745,9 @@ export default function TrustVault() {
                   {busy
                     ? "Saving…"
                     : modal === "upload"
-                      ? "Add to this tab"
+                      ? isBrowserDemo
+                        ? "Add to this tab"
+                        : "Encrypt & upload"
                       : modal === "request"
                         ? "Send request for consent"
                         : "Submit immutable proposal"}{" "}
@@ -1759,10 +1927,18 @@ export default function TrustVault() {
             )}
             {share && (
               <>
-                <span className="eyebrow">{"SIMULATED RECIPIENT ACCESS"}</span>
+                <span className="eyebrow">
+                  {isBrowserDemo
+                    ? "SIMULATED RECIPIENT ACCESS"
+                    : "AUTHENTICATED RECIPIENT ACCESS"}
+                </span>
                 <h2 id="dialog-title">Just what was approved.</h2>
                 <p className="muted">{share.purpose}</p>
-                <Badge tone="teal">{"Demo permission checked"}</Badge>
+                <Badge tone="teal">
+                  {isBrowserDemo
+                    ? "Demo permission checked"
+                    : "Permission verified by the server"}
+                </Badge>
                 <div className="shared-attributes">
                   {Object.entries(share.attributes).map(([k, v]) => (
                     <div key={k}>

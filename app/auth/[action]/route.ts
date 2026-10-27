@@ -2,19 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { tidecloakLoginConfigured, verifyTideToken } from "@/lib/auth";
+import { workspaceMode } from "@/lib/workspace-mode";
+import { limitRequest } from "@/lib/rate-limit";
+import { AppError } from "@/lib/errors";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ action: string }> },
 ) {
-  if (process.env.VERCEL === "1")
+  if (workspaceMode() === "demo")
     return NextResponse.redirect(new URL("/", req.url));
   const { action } = await params;
   const requestOrigin = req.nextUrl.origin;
   let origin = requestOrigin;
   let failure = "callback";
   try {
+    limitRequest(req, "oidc", 30);
     // A deployment must never send a failed login to the operator's localhost.
     if (process.env.APP_ORIGIN) {
       const configured = new URL(process.env.APP_ORIGIN);
@@ -139,7 +143,16 @@ export async function GET(
     res.cookies.delete({ name: "tv_oidc", path: "/auth" });
     res.headers.set("Cache-Control", "no-store");
     return res;
-  } catch {
+  } catch (error) {
+    if (error instanceof AppError && error.status === 429)
+      return NextResponse.json(
+        { error: error.message },
+        {
+          status: 429,
+          headers: { "Cache-Control": "no-store", "Retry-After": "60" },
+        },
+      );
+    if (error instanceof AppError && error.status === 403) failure = "account";
     const res = NextResponse.redirect(requestOrigin + "/?authError=" + failure);
     res.cookies.delete({ name: "tv_oidc", path: "/auth" });
     res.headers.set("Cache-Control", "no-store");

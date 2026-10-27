@@ -2,9 +2,13 @@
 // Builds never connect to a database or run migrations.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-const result = spawnSync(
-  process.execPath,
-  [path.resolve("node_modules/next/dist/bin/next"), "build", "--webpack"],
-  { stdio: "inherit", env: process.env },
-);
-process.exit(result.status ?? 1);
+for (const [file, args] of [
+  ["scripts/generate.mjs", []],
+  ["node_modules/next/dist/bin/next", ["build", "--webpack"]],
+]) {
+  const result = spawnSync(process.execPath, [path.resolve(file), ...args], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}

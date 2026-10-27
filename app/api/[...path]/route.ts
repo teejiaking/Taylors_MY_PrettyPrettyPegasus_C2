@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { db } from "@/lib/db";
+import { getDb, databaseConfigured } from "@/lib/db";
+import { workspaceMode } from "@/lib/workspace-mode";
+import { storageConfigured } from "@/lib/storage";
 import {
   authenticate,
   assertSameOrigin,
@@ -9,7 +11,8 @@ import {
   sessionCookie,
   tidecloakLoginConfigured,
 } from "@/lib/auth";
-import { AppError } from "@/lib/storage";
+import { AppError, MAX_FILE_SIZE } from "@/lib/storage";
+import { limitRequest } from "@/lib/rate-limit";
 import * as service from "@/lib/service";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,14 +33,15 @@ async function dispatch(
   const { path } = await params;
   const route = path.join("/");
   try {
-    if (process.env.VERCEL === "1")
+    if (workspaceMode() === "demo")
       return json(
         {
           error:
-            "The hosted app is a browser demo; server accounts and storage are not enabled.",
+            "Server account operations are unavailable in browser demo mode.",
         },
         503,
       );
+    limitRequest(req, "api", 180);
     if (req.method === "POST") assertSameOrigin(req);
     if (route === "session" && req.method === "GET") {
       let user = null;
@@ -47,7 +51,7 @@ async function dispatch(
         if (!(e instanceof AppError)) throw e;
       }
       const identities = isDemo()
-        ? await db.user.findMany({
+        ? await getDb().user.findMany({
             where: { demo: true },
             select: {
               id: true,
@@ -58,7 +62,7 @@ async function dispatch(
             },
           })
         : [];
-      return json({
+      const res = json({
         user: user
           ? {
               id: user.id,
@@ -72,9 +76,14 @@ async function dispatch(
         authMode: process.env.AUTH_MODE || "unconfigured",
         configured:
           isDemo() ||
-          (process.env.AUTH_MODE === "tidecloak" && tidecloakLoginConfigured()),
+          (process.env.AUTH_MODE === "tidecloak" &&
+            tidecloakLoginConfigured() &&
+            databaseConfigured() &&
+            storageConfigured()),
         identities,
       });
+      if (!user && req.cookies.has("tv_tide")) res.cookies.delete("tv_tide");
+      return res;
     }
     if (route === "demo/login" && req.method === "POST") {
       if (!isDemo())
@@ -105,7 +114,10 @@ async function dispatch(
     if (route === "overview" && req.method === "GET")
       return json(await service.overview(user));
     if (route === "documents" && req.method === "POST") {
-      if (Number(req.headers.get("content-length")) > 6 * 1024 * 1024)
+      if (
+        Number(req.headers.get("content-length")) >
+        MAX_FILE_SIZE + 256 * 1024
+      )
         throw new AppError(413, "Upload too large.");
       const form = await req.formData();
       const file = form.get("file");
@@ -174,14 +186,16 @@ async function dispatch(
   } catch (e) {
     if (e instanceof AppError) {
       if (e.status === 401 && path[0] === "grants" && path[2] === "access")
-        await service.event(
-          null,
-          null,
-          "GRANT_ACCESS",
-          "DENIED",
-          path[1] ?? null,
-          "Unauthenticated grant access denied.",
-        );
+        await service
+          .event(
+            null,
+            null,
+            "GRANT_ACCESS",
+            "DENIED",
+            path[1] ?? null,
+            "Unauthenticated grant access denied.",
+          )
+          .catch(() => {});
       return json({ error: e.message }, e.status);
     }
     if (e instanceof ZodError)
